@@ -21,21 +21,38 @@
     .thread { display: grid; gap:.6rem; height: calc(100vh - 210px); overflow:auto; padding-bottom: 84px; }
     .composer { position: sticky; bottom: 0; left: 0; right: 0; background: #0f1115; padding-top: .6rem; }
 
-    /* Container narrower so bubbles don’t sprawl */
-.chat-wrap { 
-  max-width: 760px;          /* was 900 */
-  margin: 0 auto;
-  display: grid; 
-  gap: .5rem;
+/* Use the whole width */
+.chat-wrap {
+  flex: 1;                 /* take remaining height */
+  width: 100%;
+  max-width: none;         /* remove 900px cap */
+  margin: 0;               /* no side margins */
+  padding: .5rem 1rem;     /* gentle gutters */
+  display: flex; 
+  flex-direction: column;
+  gap: .6rem;
+  opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease;
+}
+.chat-started .chat-wrap { opacity: 1; transform: none; }
+
+
+/* Scrollable thread that fills */
+.thread {
+  flex: 1;                 /* fill vertical space */
+  min-height: 0;           /* allow flex child to shrink */
+  overflow: auto;
+  display: grid;
+  gap: .6rem;
+  padding-bottom: 84px;    /* space for composer */
 }
 
-/* Thread area height a little smaller so there isn’t a big empty gap */
-.thread {
-  display: grid;
-  gap: .5rem;
-  height: calc(100vh - 180px);   /* was ~210px */
-  overflow: auto;
-  padding-bottom: 68px;          /* room for composer */
+/* Composer docked at bottom */
+.composer {
+  position: sticky;
+  bottom: 0;
+  left: 0; right: 0;
+  background: #0f1115;
+  padding-top: .6rem;
 }
 
 /* Input bar a bit slimmer */
@@ -225,7 +242,7 @@
     <!-- HERO -->
     <section class="hero">
       <div class="prompt" style="max-width:900px; width:100%;">
-        <h1 class="mb-4 fw-semibold">What are you working on?</h1>
+        <h1 class="mb-4 fw-semibold">Automobile Insurace Assistance</h1>
         <!-- Input with book icon + doc pill -->
         <div class="input-group big-input">
           <button id="docBtnHero" class="btn icon-btn" type="button" title="Choose policy (or upload)">
