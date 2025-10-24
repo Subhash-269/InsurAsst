@@ -18,7 +18,12 @@
     /* Chat layout */
     .chat-wrap { max-width: 900px; margin: 0 auto; display: grid; gap: .6rem; opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease; }
     .chat-started .chat-wrap { opacity: 1; transform: none; }
-    .thread { display: grid; gap:.6rem; height: calc(100vh - 210px); overflow:auto; padding-bottom: 84px; }
+    .thread { 
+      display: grid; 
+      gap:.6rem; 
+      /* height: calc(100vh - 210px);  */
+      /* overflow:auto;  */
+      padding-bottom: 84px; }
     .composer { position: sticky; bottom: 0; left: 0; right: 0; background: #0f1115; padding-top: .6rem; }
 
     /* Use the whole width */
