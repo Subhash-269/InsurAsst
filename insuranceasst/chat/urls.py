@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 
+
 urlpatterns = [
     path('', views.index, name='index'),
     path('health/', views.health, name='health'),
@@ -9,4 +10,6 @@ urlpatterns = [
     path('api/files/', views.list_files, name='list_files'),
     path('api/files/upload/', views.upload_file, name='upload_file'),
     path('api/reindex/', views.reindex, name='reindex'),
+    path('api/vision/analyze/', views.vision_analyze, name='vision_analyze'),  # <-- NEW
+
 ]

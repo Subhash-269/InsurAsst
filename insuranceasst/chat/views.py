@@ -8,6 +8,9 @@ from django.core.files.storage import FileSystemStorage
 
 from backend.search__ import RAGSearch
 from django.http import StreamingHttpResponse
+import uuid, cv2, numpy as np
+from ultralytics import YOLO
+
 
 # ---------- RAG singleton ----------
 _rag = None
@@ -211,3 +214,99 @@ def chat_stream(request):
         return StreamingHttpResponse(gen(), content_type="text/plain")
     except Exception as e:
         return StreamingHttpResponse(iter([f"Error: {e}"]), content_type="text/plain", status=500)
+
+# lazy globals
+_yolo = None
+_CARDD_CLASSES = ["crack", "dent", "glass shatter", "lamp broken", "scratch", "tire flat"]
+
+def _get_yolo():
+    global _yolo
+    if _yolo is None:
+        model_path = getattr(settings, 'CARDD_MODEL_PATH', 'yolov11-seg-cardd.pt')
+        _yolo = YOLO(model_path)
+    return _yolo
+
+def _media_root() -> Path:
+    return Path(getattr(settings, "MEDIA_ROOT", settings.BASE_DIR / "data"))
+
+def _media_url(rel: str) -> str:
+    return f"{settings.MEDIA_URL}{rel}".replace("\\", "/")
+
+@csrf_exempt
+def vision_analyze(request):
+    """
+    POST multipart/form-data with 'image'
+    Returns: { ok, annotated_url, counts:{}, detections:[...], summary }
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+    if "image" not in request.FILES:
+        return JsonResponse({"error": "No 'image' file found"}, status=400)
+
+    try:
+        img_file = request.FILES["image"]
+        # save original
+        claims_dir = _media_root() / "images" / "claims"
+        claims_dir.mkdir(parents=True, exist_ok=True)
+        stem = uuid.uuid4().hex
+        ext = Path(img_file.name).suffix.lower() or ".jpg"
+        raw_path = claims_dir / f"{stem}{ext}"
+        with open(raw_path, "wb") as f:
+            for chunk in img_file.chunks():
+                f.write(chunk)
+
+        # run YOLO seg
+        model = _get_yolo()
+        results = model.predict(source=str(raw_path), imgsz=640, conf=0.25, device=0)
+        res = results[0]
+
+        # annotated image (with masks/boxes/labels)
+        im_annotated = res.plot()  # numpy BGR
+        ann_path = claims_dir / f"{stem}_annotated.jpg"
+        cv2.imwrite(str(ann_path), im_annotated)
+
+        # detections + counts
+        detections = []
+        counts = {name: 0 for name in _CARDD_CLASSES}
+        for i, b in enumerate(res.boxes):
+            cls_id = int(b.cls[0])
+            score = float(b.conf[0])
+            xyxy  = [float(v) for v in b.xyxy[0].tolist()]
+            name  = _CARDD_CLASSES[cls_id] if 0 <= cls_id < len(_CARDD_CLASSES) else str(cls_id)
+            counts[name] = counts.get(name, 0) + 1
+            det = {"class_id": cls_id, "class_name": name, "score": score, "box": xyxy}
+            # polygons if available
+            if res.masks is not None and i < len(res.masks.xy):
+                poly = res.masks.xy[i]
+                if isinstance(poly, list):
+                    det["polygons"] = [p.tolist() for p in poly]
+                else:
+                    det["polygons"] = [poly.tolist()]
+            detections.append(det)
+
+        # build a concise fact payload for LLM summary
+        facts = {
+            "counts": {k: v for k, v in counts.items() if v > 0},
+            "total_instances": sum(counts.values()),
+        }
+        fact_str = json.dumps(facts, indent=2)
+
+        # readable summary with your existing LLM (Mistral)
+        rag = _get_rag()
+        summary_prompt = (
+            "You are an auto-claims assistant. Given these vision detections, write a short, plain-English summary "
+            "of the observed damage (1-3 sentences), mentioning the types and approximate counts. Be neutral and factual.\n\n"
+            f"Detections JSON:\n{fact_str}\n\nSummary:"
+        )
+        summary = rag.llm.generate(summary_prompt, max_new_tokens=120).strip()
+
+        rel_ann = ann_path.relative_to(_media_root()).as_posix()
+        return JsonResponse({
+            "ok": True,
+            "annotated_url": _media_url(rel_ann),
+            "counts": facts["counts"],
+            "detections": detections,
+            "summary": summary
+        })
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
