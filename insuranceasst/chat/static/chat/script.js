@@ -95,43 +95,92 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function streamAnswer(q) {
-    if (aborter) aborter.abort();
-    aborter = new AbortController();
+  if (aborter) aborter.abort();
+  aborter = new AbortController();
 
-    const botDiv = addBubble('', 'bot');
+  const botDiv = addBubble('', 'bot');
 
-    try {
-      const res = await fetch('/api/chat/stream/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: q, doc: selectedDoc }),
-        signal: aborter.signal
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        botDiv.textContent = t || ('HTTP ' + res.status);
-        return botDiv;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        botDiv.textContent += decoder.decode(value, { stream: true });
-        botDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }
+  // Helpers: only autoscroll if user is already near the bottom
+  const isNearBottom = () => {
+    const el = thread;
+    const threshold = 24; // px
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  };
+  const scrollToBottomInstant = () => {
+    thread.scrollTop = thread.scrollHeight;
+  };
+
+  // Streaming buffer to avoid per-chunk layout thrash
+  let buffer = '';
+  let flushing = false;
+
+  const flush = () => {
+    if (flushing || buffer.length === 0) return;
+    flushing = true;
+    // Append text once per frame-ish
+    requestAnimationFrame(() => {
+      botDiv.textContent += buffer;
+      buffer = '';
+      // Only move the viewport if user hasn't scrolled up
+      if (isNearBottom()) scrollToBottomInstant();
+      flushing = false;
+    });
+  };
+
+  try {
+    const res = await fetch('/api/chat/stream/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: q, doc: selectedDoc }),
+      signal: aborter.signal
+    });
+
+    if (!res.ok || !res.body) {
+      const t = await res.text();
+      botDiv.textContent = t || ('HTTP ' + res.status);
       return botDiv;
-    } catch (e) {
-      if (e.name === 'AbortError') {
-        botDiv.textContent += ' [stopped]';
-      } else {
-        botDiv.textContent = 'Error: ' + e.message;
-      }
-      return botDiv;
-    } finally {
-      aborter = null;
     }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let nearBottom = true;
+
+    // Track once at start whether we should auto-scroll
+    nearBottom = isNearBottom();
+
+    // Timer: flush the buffer at ~60–100ms cadence as a fallback
+    const interval = setInterval(flush, 80);
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Opportunistic flush via rAF (throttled)
+      flush();
+    }
+
+    clearInterval(interval);
+    // Final flush
+    if (buffer) {
+      botDiv.textContent += buffer;
+      buffer = '';
+    }
+    // Do a last instant snap to bottom if the user was near bottom
+    if (nearBottom) scrollToBottomInstant();
+
+    return botDiv;
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      botDiv.textContent += ' [stopped]';
+    } else {
+      botDiv.textContent = 'Error: ' + e.message;
+    }
+    return botDiv;
+  } finally {
+    aborter = null;
   }
+}
+
 
   // ---------- MESSAGE FLOWS ----------
   async function firstAsk() {

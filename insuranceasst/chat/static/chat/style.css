@@ -76,3 +76,14 @@ body, html { height: 100%; }
 .suggestions .chip:hover {
   background: var(--bubble-bot);
 }
+
+/* Prevent layout shifts from scrollbar appearing/disappearing */
+.thread {
+  scrollbar-gutter: stable both-edges;  /* modern browsers */
+  overscroll-behavior: contain;         /* stops bounce chaining */
+}
+
+/* Reduce repaint cost of the streaming bubble */
+.bubble {
+  contain: paint; /* isolates paints for less full-thread repainting */
+}
