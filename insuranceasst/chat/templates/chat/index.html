@@ -9,99 +9,50 @@
   <title>EAI6080: Final Project Demo: Insurance Assistant</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    :root { color-scheme: dark; }
-    body { background: #0f1115; color: #e5e7eb; }
-    .muted { color: #94a3b8; }
+  :root { color-scheme: dark; }
+  body { background: #0f1115; color: #e5e7eb; padding-top: 64px; } /* space for fixed navbar */
+  .muted { color: #94a3b8; }
 
-    /* Landing hero -> fades once chat starts */
-    .hero { min-height: 46vh; display:flex; align-items:center; justify-content:center; text-align:center; transition: opacity .25s ease, transform .25s ease, height .25s ease; }
-    .chat-started .hero { opacity:0; transform: translateY(-8px); height:0; overflow:hidden; }
+  /* Hero fade */
+  .hero {
+    min-height: 46vh; display:flex; align-items:center; justify-content:center; text-align:center;
+    transition: opacity .25s ease, transform .25s ease, height .25s ease;
+  }
+  .chat-started .hero { opacity:0; transform: translateY(-8px); height:0; overflow:hidden; }
 
-    /* Chat layout */
-    .chat-wrap { max-width: 900px; margin: 0 auto; display: grid; gap: .6rem; opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease; }
-    .chat-started .chat-wrap { opacity: 1; transform: none; }
-    .thread { 
-      display: grid; 
-      gap:.6rem; 
-      /* height: calc(100vh - 210px);  */
-      /* overflow:auto;  */
-      padding-bottom: 84px; }
-    .composer { position: sticky; bottom: 0; left: 0; right: 0; background: #0f1115; padding-top: .6rem; }
+  /* Keep only the basic chat-wrap animation; width is controlled by .center-rail in style.css */
+  .chat-wrap { opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease; }
+  .chat-started .chat-wrap { opacity: 1; transform: none; }
 
-    /* Use the whole width */
-    .chat-wrap {
-      flex: 1;
-      width: 100%;
-      max-width: none;
-      margin: 0;
-      padding: .5rem 1rem;
-      display: flex;
-      flex-direction: column;
-      gap: .6rem;
-      opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease;
-    }
-    .chat-started .chat-wrap { opacity: 1; transform: none; }
+  /* Thread basics; width/centering handled by .center-rail in style.css */
+  .thread { display: grid; gap:.6rem; padding-bottom: 84px; }
 
-    /* Scrollable thread that fills */
-    .thread {
-      flex: 1;
-      min-height: 0;
-      overflow: auto;
-      display: grid;
-      gap: .6rem;
-      padding-bottom: 84px;
-    }
+  /* Composer sticks at bottom but stays inside the centered rail */
+  .composer {
+    position: sticky; bottom: 0; left: 0; right: 0;
+    background: #0f1115; padding-top: .6rem;
+  }
 
-    /* Composer docked at bottom */
-    .composer {
-      position: sticky;
-      bottom: 0;
-      left: 0; right: 0;
-      background: #0f1115;
-      padding-top: .6rem;
-    }
+  /* Bubbles (base look); colors refined in style.css if needed */
+  .bubble {
+    display: inline-block; width: fit-content; max-width: 72%;
+    padding: .55rem .8rem; border-radius: 12px; line-height: 1.35; font-size: .97rem;
+    border: 1px solid #27304a; white-space: pre-wrap;
+  }
+  .bubble.user { justify-self: end; background: #26314b; color: #e8eefc; }
+  .bubble.bot  { justify-self: start; background: #1b2030; color: #e5e7eb; }
 
-    /* Input bar a bit slimmer */
-    .big-input .form-control {
-      height: 48px;
-      font-size: .98rem;
-    }
+  .doc-pill { font-size:.85rem; border:1px solid #27304a; background:#151822; color:#cbd5e1; border-radius:999px; padding:.25rem .6rem; }
+  .doc-pill.bad { border-color:#7f1d1d; color:#fecaca; background:#3f1f1f; }
+  .icon-btn { border:1px solid #27304a; background:#151822; color:#cbd5e1; }
+  .icon-btn:hover { background:#1b2030; color:#e5e7eb; }
 
-    /* COMPACT BUBBLES */
-    .bubble {
-      display: inline-block;
-      width: fit-content;
-      max-width: 72%;
-      padding: .55rem .8rem;
-      border-radius: 12px;
-      line-height: 1.35;
-      font-size: .97rem;
-      border: 1px solid #27304a;
-      white-space: pre-wrap;
-    }
-    .bubble > * { margin: 0 0 .35rem 0; }
-    .bubble > *:last-child { margin-bottom: 0; }
-    .bubble.user { justify-self: end; background: #26314b; color: #e8eefc; }
-    .bubble.bot  { justify-self: start; background: #1b2030; color: #e5e7eb; }
+  .fab {
+    position: fixed; bottom: 24px; left: 24px; width: 52px; height: 52px; border-radius: 999px;
+    font-size: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.35); z-index: 1055;
+  }
+</style>
 
-    /* Doc pill + icon */
-    .doc-pill { font-size:.85rem; border:1px solid #27304a; background:#151822; color:#cbd5e1; border-radius:999px; padding:.25rem .6rem; }
-    .doc-pill.bad { border-color:#7f1d1d; color:#fecaca; background:#3f1f1f; }
-    .icon-btn { border:1px solid #27304a; background:#151822; color:#cbd5e1; }
-    .icon-btn:hover { background:#1b2030; color:#e5e7eb; }
-
-    .fab {
-      position: fixed;
-      bottom: 24px;
-      left: 24px;
-      width: 52px;
-      height: 52px;
-      border-radius: 999px;
-      font-size: 20px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.35);
-      z-index: 1055;
-    }
-  </style>
 </head>
 <body>
   <nav class="navbar navbar-dark fixed-top" style="background:#0f1115;">
@@ -232,7 +183,7 @@
   <main class="container">
     <!-- HERO -->
     <section class="hero">
-      <div class="prompt" style="max-width:900px; width:100%;">
+      <div class="prompt center-rail" style="max-width:900px; width:100%;">
         <h1 class="mb-4 fw-semibold">Automobile Insurace Assistance</h1>
         <div class="input-group big-input">
           <button id="docBtnHero" class="btn icon-btn" type="button" title="Choose policy (or upload)">📚</button>
@@ -251,7 +202,7 @@
     </section>
 
     <!-- CHAT SCREEN -->
-    <section class="chat-wrap">
+    <section class="chat-wrap center-rail">
       <div class="thread" id="thread"></div>
       <div class="composer">
         <div class="input-group big-input">

@@ -120,3 +120,8 @@ body, html { height: 100%; }
   max-height: 300px;
   box-shadow: 0 0 0 1px #1f2230, 0 2px 8px rgba(0,0,0,.4);
 }
+.center-rail { width:100%; max-width:900px; margin-inline:auto; padding-inline:1rem; }
+.chat-wrap { display:flex; flex-direction:column; gap:.6rem; }
+.thread { display:grid; gap:.6rem; padding-bottom:84px; }
+.composer { position: sticky; bottom: 0; background: rgba(15,17,21,.9); backdrop-filter: blur(6px); border-top: 1px solid #27304a; }
+
