@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-
+import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -34,7 +34,8 @@ LLM_MODEL = "mistral"    # or your local model name
 # Serve files from ./data for previews/uploads (DEV only)
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "data"
-
+MODELS_DIR = BASE_DIR / 'models'
+CARDD_MODEL_PATH = os.path.join(MODELS_DIR, 'yolov11-seg-cardd.pt')
 
 # Application definition
 

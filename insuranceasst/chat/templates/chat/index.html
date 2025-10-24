@@ -2,260 +2,199 @@
 <!doctype html>
 <html lang="en" data-bs-theme="dark">
 <head>
+  <link rel="stylesheet" href="{% static 'chat/style.css' %}">
+
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Insurance Assistant</title>
+  <title>EAI6080: Final Project Demo: Insurance Assistant</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    :root { color-scheme: dark; }
-    body { background: #0f1115; color: #e5e7eb; }
-    .muted { color: #94a3b8; }
+  :root { color-scheme: dark; }
+  body { background: #0f1115; color: #e5e7eb; padding-top: 64px; } /* space for fixed navbar */
+  .muted { color: #94a3b8; }
 
-    /* Landing hero -> fades once chat starts */
-    .hero { min-height: 46vh; display:flex; align-items:center; justify-content:center; text-align:center; transition: opacity .25s ease, transform .25s ease, height .25s ease; }
-    .chat-started .hero { opacity:0; transform: translateY(-8px); height:0; overflow:hidden; }
+  /* Hero fade */
+  .hero {
+    min-height: 46vh; display:flex; align-items:center; justify-content:center; text-align:center;
+    transition: opacity .25s ease, transform .25s ease, height .25s ease;
+  }
+  .chat-started .hero { opacity:0; transform: translateY(-8px); height:0; overflow:hidden; }
 
-    /* Chat layout */
-    .chat-wrap { max-width: 900px; margin: 0 auto; display: grid; gap: .6rem; opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease; }
-    .chat-started .chat-wrap { opacity: 1; transform: none; }
-    .thread { display: grid; gap:.6rem; height: calc(100vh - 210px); overflow:auto; padding-bottom: 84px; }
-    .composer { position: sticky; bottom: 0; left: 0; right: 0; background: #0f1115; padding-top: .6rem; }
+  /* Keep only the basic chat-wrap animation; width is controlled by .center-rail in style.css */
+  .chat-wrap { opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease; }
+  .chat-started .chat-wrap { opacity: 1; transform: none; }
 
-/* Use the whole width */
-.chat-wrap {
-  flex: 1;                 /* take remaining height */
-  width: 100%;
-  max-width: none;         /* remove 900px cap */
-  margin: 0;               /* no side margins */
-  padding: .5rem 1rem;     /* gentle gutters */
-  display: flex; 
-  flex-direction: column;
-  gap: .6rem;
-  opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .25s ease;
-}
-.chat-started .chat-wrap { opacity: 1; transform: none; }
+  /* Thread basics; width/centering handled by .center-rail in style.css */
+  .thread { display: grid; gap:.6rem; padding-bottom: 84px; }
 
+  /* Composer sticks at bottom but stays inside the centered rail */
+  .composer {
+    position: sticky; bottom: 0; left: 0; right: 0;
+    background: #0f1115; padding-top: .6rem;
+  }
 
-/* Scrollable thread that fills */
-.thread {
-  flex: 1;                 /* fill vertical space */
-  min-height: 0;           /* allow flex child to shrink */
-  overflow: auto;
-  display: grid;
-  gap: .6rem;
-  padding-bottom: 84px;    /* space for composer */
-}
+  /* Bubbles (base look); colors refined in style.css if needed */
+  .bubble {
+    display: inline-block; width: fit-content; max-width: 72%;
+    padding: .55rem .8rem; border-radius: 12px; line-height: 1.35; font-size: .97rem;
+    border: 1px solid #27304a; white-space: pre-wrap;
+  }
+  .bubble.user { justify-self: end; background: #26314b; color: #e8eefc; }
+  .bubble.bot  { justify-self: start; background: #1b2030; color: #e5e7eb; }
 
-/* Composer docked at bottom */
-.composer {
-  position: sticky;
-  bottom: 0;
-  left: 0; right: 0;
-  background: #0f1115;
-  padding-top: .6rem;
-}
+  .doc-pill { font-size:.85rem; border:1px solid #27304a; background:#151822; color:#cbd5e1; border-radius:999px; padding:.25rem .6rem; }
+  .doc-pill.bad { border-color:#7f1d1d; color:#fecaca; background:#3f1f1f; }
+  .icon-btn { border:1px solid #27304a; background:#151822; color:#cbd5e1; }
+  .icon-btn:hover { background:#1b2030; color:#e5e7eb; }
 
-/* Input bar a bit slimmer */
-.big-input .form-control { 
-  height: 48px;                  /* was 56px */
-  font-size: .98rem;
-}
+  .fab {
+    position: fixed; bottom: 24px; left: 24px; width: 52px; height: 52px; border-radius: 999px;
+    font-size: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.35); z-index: 1055;
+  }
+</style>
 
-/* COMPACT BUBBLES */
-.bubble {
-  display: inline-block;
-  width: fit-content;            /* shrink to content */
-  max-width: 72%;                /* was 85% */
-  padding: .55rem .8rem;         /* was .75rem 1rem */
-  border-radius: 12px;           /* was 14px */
-  line-height: 1.35;             /* was 1.45 */
-  font-size: .97rem;             /* slightly smaller text */
-  border: 1px solid #27304a;
-  white-space: pre-wrap;
-}
-
-/* Tighten inner element spacing if any HTML shows up */
-.bubble > * { margin: 0 0 .35rem 0; }
-.bubble > *:last-child { margin-bottom: 0; }
-
-/* keep the colors you already had */
-.bubble.user { 
-  justify-self: end; 
-  background: #26314b; 
-  color: #e8eefc; 
-}
-.bubble.bot  { 
-  justify-self: start; 
-  background: #1b2030; 
-  color: #e5e7eb; 
-}
-
-    /* Doc pill + icon */
-    .doc-pill { font-size:.85rem; border:1px solid #27304a; background:#151822; color:#cbd5e1; border-radius:999px; padding:.25rem .6rem; }
-    .doc-pill.bad { border-color:#7f1d1d; color:#fecaca; background:#3f1f1f; }
-    .icon-btn { border:1px solid #27304a; background:#151822; color:#cbd5e1; }
-    .icon-btn:hover { background:#1b2030; color:#e5e7eb; }
-
-    /* .icon-btn img {
-    filter: invert(0.8);
-    opacity: 0.9;
-    transition: opacity 0.2s ease;
-    }
-    .icon-btn:hover img {
-    opacity: 1;
-    } */
-     .fab {
-  position: fixed; 
-  bottom: 24px; 
-  left: 24px; 
-  width: 52px; 
-  height: 52px; 
-  border-radius: 999px; 
-  font-size: 20px; 
-  box-shadow: 0 8px 24px rgba(0,0,0,.35);
-  z-index: 1055;
-}
-
-
-  </style>
 </head>
 <body>
-  <nav class="navbar navbar-dark" style="background:#0f1115;">
-    <div class="container">
-      <span class="navbar-brand">Insurance Assistant</span>
-      <div class="d-flex gap-2">
-        <a class="btn btn-outline-secondary btn-sm" href="/health/" target="_blank">Health</a>
-        <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#docsModal">Manage documents</button>
-      </div>
+  <nav class="navbar navbar-dark fixed-top" style="background:#0f1115;">
+  <div class="container position-relative d-flex justify-content-between align-items-center">
+    <span class="navbar-text text-light fw-semibold">EAI6080: Final Project Demo</span>
+
+    <span class="navbar-brand mx-auto position-absolute start-50 translate-middle-x">
+      Insurance Assistant
+    </span>
+
+    <div class="d-flex gap-2 ms-auto">
+      <a class="btn btn-outline-secondary btn-sm" href="/health/" target="_blank">Health</a>
+      <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#docsModal">
+        Manage documents
+      </button>
     </div>
-  </nav>
+  </div>
+</nav>
+
+
 
   <!-- Floating Menu Button -->
-<button id="fabMenu" class="btn btn-primary fab" title="Menu">☰</button>
+  <button id="fabMenu" class="btn btn-primary fab" title="Menu">☰</button>
 
-<!-- Sidebar / Offcanvas -->
-<div class="offcanvas offcanvas-start" tabindex="-1" id="quickMenu" style="background:#151822; color:#e5e7eb;">
-  <div class="offcanvas-header">
-    <h5 class="offcanvas-title">Quick Actions</h5>
-    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-  </div>
-  <div class="offcanvas-body d-grid gap-2">
-    <button class="btn btn-outline-light text-start" id="menuMyPolicy">📚 My Policy</button>
-    <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#claimStatusModal">🧾 Claim Status</button>
-    <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#premiumCalcModal">🧮 Premium Calculator</button>
-    <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#faqsModal">❓ FAQs</button>
-    <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#contactModal">📞 Contact Support</button>
-  </div>
-</div>
-
-<!-- Claim Status Modal -->
-<div class="modal fade" id="claimStatusModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content" style="background:#151822; border-color:#222636;">
-      <div class="modal-header">
-        <h5 class="modal-title">Check Claim Status</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body d-grid gap-2">
-        <input id="claimNumber" class="form-control" placeholder="Enter claim number (e.g., CLM-12345)" />
-        <button id="checkClaimBtn" class="btn btn-primary">Check Status</button>
-        <div id="claimStatusResult" class="mt-2 text-secondary small">Status will appear here.</div>
-      </div>
+  <!-- Sidebar / Offcanvas -->
+  <div class="offcanvas offcanvas-start" tabindex="-1" id="quickMenu" style="background:#151822; color:#e5e7eb;">
+    <div class="offcanvas-header">
+      <h5 class="offcanvas-title">Quick Actions</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body d-grid gap-2">
+      <button class="btn btn-outline-light text-start" id="menuMyPolicy">📚 My Policy</button>
+      <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#claimStatusModal">🧾 Claim Status</button>
+      <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#premiumCalcModal">🧮 Premium Calculator</button>
+      <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#faqsModal">❓ FAQs</button>
+      <button class="btn btn-outline-light text-start" data-bs-toggle="modal" data-bs-target="#contactModal">📞 Contact Support</button>
     </div>
   </div>
-</div>
 
-<!-- Premium Calculator Modal -->
-<div class="modal fade" id="premiumCalcModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content" style="background:#151822; border-color:#222636;">
-      <div class="modal-header">
-        <h5 class="modal-title">Out-of-Pocket Estimator</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="row g-2">
-          <div class="col-6">
-            <label class="form-label">Estimated damage ($)</label>
-            <input id="calcDamage" type="number" class="form-control" placeholder="e.g., 1200" />
-          </div>
-          <div class="col-6">
-            <label class="form-label">Deductible ($)</label>
-            <input id="calcDeductible" type="number" class="form-control" placeholder="e.g., 500" />
-          </div>
-          <div class="col-12">
-            <label class="form-label">Coverage limit ($, optional)</label>
-            <input id="calcLimit" type="number" class="form-control" placeholder="leave blank if unknown" />
-          </div>
+  <!-- Claim Status Modal -->
+  <div class="modal fade" id="claimStatusModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content" style="background:#151822; border-color:#222636;">
+        <div class="modal-header">
+          <h5 class="modal-title">Check Claim Status</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <button id="calcRun" class="btn btn-primary mt-3">Calculate</button>
-        <div id="calcResult" class="mt-3"></div>
-        <div class="form-text mt-2">Rough estimate only—refer to your policy for actual coverage.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- FAQs Modal -->
-<div class="modal fade" id="faqsModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content" style="background:#151822; border-color:#222636;">
-      <div class="modal-header">
-        <h5 class="modal-title">Quick FAQs</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="list-group" id="faqList">
-          <button class="list-group-item list-group-item-action bg-transparent text-start text-light">What is my deductible?</button>
-          <button class="list-group-item list-group-item-action bg-transparent text-start text-light">Does my policy cover rental cars?</button>
-          <button class="list-group-item list-group-item-action bg-transparent text-start text-light">Is glass damage covered?</button>
-          <button class="list-group-item list-group-item-action bg-transparent text-start text-light">How do I file a claim?</button>
-          <button class="list-group-item list-group-item-action bg-transparent text-start text-light">What’s the towing coverage?</button>
+        <div class="modal-body d-grid gap-2">
+          <input id="claimNumber" class="form-control" placeholder="Enter claim number (e.g., CLM-12345)" />
+          <button id="checkClaimBtn" class="btn btn-primary">Check Status</button>
+          <div id="claimStatusResult" class="mt-2 text-secondary small">Status will appear here.</div>
         </div>
       </div>
     </div>
   </div>
-</div>
 
-<!-- Contact Support Modal -->
-<div class="modal fade" id="contactModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content" style="background:#151822; border-color:#222636;">
-      <div class="modal-header">
-        <h5 class="modal-title">Contact Support</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body d-grid gap-2">
-        <input id="supportName" class="form-control" placeholder="Your name" />
-        <input id="supportEmail" type="email" class="form-control" placeholder="you@example.com" />
-        <textarea id="supportMsg" class="form-control" rows="3" placeholder="How can we help?"></textarea>
-        <a id="supportSend" class="btn btn-primary" href="#">Send Email</a>
-        <div class="form-text">We’ll open your email client. For urgent issues call your insurer’s hotline.</div>
+  <!-- Premium Calculator Modal -->
+  <div class="modal fade" id="premiumCalcModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content" style="background:#151822; border-color:#222636;">
+        <div class="modal-header">
+          <h5 class="modal-title">Out-of-Pocket Estimator</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Estimated damage ($)</label>
+              <input id="calcDamage" type="number" class="form-control" placeholder="e.g., 1200" />
+            </div>
+            <div class="col-6">
+              <label class="form-label">Deductible ($)</label>
+              <input id="calcDeductible" type="number" class="form-control" placeholder="e.g., 500" />
+            </div>
+            <div class="col-12">
+              <label class="form-label">Coverage limit ($, optional)</label>
+              <input id="calcLimit" type="number" class="form-control" placeholder="leave blank if unknown" />
+            </div>
+          </div>
+          <button id="calcRun" class="btn btn-primary mt-3">Calculate</button>
+          <div id="calcResult" class="mt-3"></div>
+          <div class="form-text mt-2">Rough estimate only—refer to your policy for actual coverage.</div>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
+  <!-- FAQs Modal -->
+  <div class="modal fade" id="faqsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content" style="background:#151822; border-color:#222636;">
+        <div class="modal-header">
+          <h5 class="modal-title">Quick FAQs</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="list-group" id="faqList">
+            <button class="list-group-item list-group-item-action bg-transparent text-start text-light">What is my deductible?</button>
+            <button class="list-group-item list-group-item-action bg-transparent text-start text-light">Does my policy cover rental cars?</button>
+            <button class="list-group-item list-group-item-action bg-transparent text-start text-light">Is glass damage covered?</button>
+            <button class="list-group-item list-group-item-action bg-transparent text-start text-light">How do I file a claim?</button>
+            <button class="list-group-item list-group-item-action bg-transparent text-start text-light">What’s the towing coverage?</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contact Support Modal -->
+  <div class="modal fade" id="contactModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content" style="background:#151822; border-color:#222636;">
+        <div class="modal-header">
+          <h5 class="modal-title">Contact Support</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body d-grid gap-2">
+          <input id="supportName" class="form-control" placeholder="Your name" />
+          <input id="supportEmail" type="email" class="form-control" placeholder="you@example.com" />
+          <textarea id="supportMsg" class="form-control" rows="3" placeholder="How can we help?"></textarea>
+          <a id="supportSend" class="btn btn-primary" href="#">Send Email</a>
+          <div class="form-text">We’ll open your email client. For urgent issues call your insurer’s hotline.</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <main class="container">
-
     <!-- HERO -->
     <section class="hero">
-      <div class="prompt" style="max-width:900px; width:100%;">
+      <div class="prompt center-rail" style="max-width:900px; width:100%;">
         <h1 class="mb-4 fw-semibold">Automobile Insurace Assistance</h1>
-        <!-- Input with book icon + doc pill -->
         <div class="input-group big-input">
-          <button id="docBtnHero" class="btn icon-btn" type="button" title="Choose policy (or upload)">
-            📚
-        </button>
-
+          <button id="docBtnHero" class="btn icon-btn" type="button" title="Choose policy (or upload)">📚</button>
+          <button id="imgBtnHero" class="btn icon-btn" type="button" title="Analyze photo">🖼️</button>
+          <input id="imgInputHero" type="file" accept="image/*" hidden>
           <input id="message" class="form-control" placeholder="Ask anything" />
           <button id="send" class="btn btn-primary btn-lg" disabled>Send</button>
         </div>
         <div class="d-flex justify-content-center gap-2 mt-2">
           <span id="docPillHero" class="doc-pill bad">No policy selected</span>
         </div>
-
         <div class="form-text muted mt-3">
           Disclaimer: This is informational, not legal advice. Coverage depends on your actual policy.
         </div>
@@ -263,14 +202,13 @@
     </section>
 
     <!-- CHAT SCREEN -->
-    <section class="chat-wrap">
+    <section class="chat-wrap center-rail">
       <div class="thread" id="thread"></div>
       <div class="composer">
         <div class="input-group big-input">
-          <button id="docBtnChat" class="btn icon-btn" type="button" title="Choose policy (or upload)">
-            📚
-        </button>
-
+          <button id="docBtnChat" class="btn icon-btn" type="button" title="Choose policy (or upload)">📚</button>
+          <button id="imgBtnChat" class="btn icon-btn" type="button" title="Analyze photo">🖼️</button>
+          <input id="imgInputChat" type="file" accept="image/*" hidden>
           <input id="message2" class="form-control" placeholder="Type your message…" />
           <button id="send2" class="btn btn-primary btn-lg" disabled>Send</button>
         </div>
@@ -304,298 +242,14 @@
             </div>
             <div class="form-text muted">Supported: pdf, txt, docx, csv, xlsx, json</div>
           </form>
-
           <div id="files" class="list-group"></div>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script>
-  // ------- state -------
-  let selectedDoc = null;
-  let aborter = null; // for cancel
-
-  // elements (IDs must match your current template)
-  const body = document.body;
-
-  // === Floating Menu wiring ===
-  const fab = document.getElementById('fabMenu');
-  const offcanvasEl = document.getElementById('quickMenu');
-  const quickMenu = new bootstrap.Offcanvas(offcanvasEl);
-
-  fab.addEventListener('click', () => quickMenu.show());
-
-  // My Policy -> open the existing docs modal and close the menu
-  document.getElementById('menuMyPolicy').addEventListener('click', () => {
-    quickMenu.hide();
-    const m = bootstrap.Modal.getOrCreateInstance(docsModal);
-    m.show();
-    loadFiles();
-  });
-
-  // Claim Status (placeholder UX)
-  document.getElementById('checkClaimBtn').addEventListener('click', () => {
-    const num = (document.getElementById('claimNumber').value || '').trim();
-    const out = document.getElementById('claimStatusResult');
-    if (!num) {
-      out.textContent = 'Please enter a claim number.';
-      return;
-    }
-    // Placeholder response — wire to backend or insurer API later
-    out.textContent = `Claim ${num}: Received — Awaiting adjuster review. (This is a demo response)`;
-  });
-
-  // Premium Calculator
-  document.getElementById('calcRun').addEventListener('click', () => {
-    const dmg = parseFloat(document.getElementById('calcDamage').value || '0');
-    const ded = parseFloat(document.getElementById('calcDeductible').value || '0');
-    const lim = parseFloat(document.getElementById('calcLimit').value || 'NaN');
-    if (isNaN(dmg) || isNaN(ded)) {
-      document.getElementById('calcResult').innerHTML = '<span class="text-warning">Enter valid numbers for damage and deductible.</span>';
-      return;
-    }
-    let payable = Math.max(0, dmg - ded);
-    if (!isNaN(lim)) payable = Math.min(payable, lim);
-    const youPay = Math.min(dmg, ded + payable); // cap at damage
-    const insurerPays = Math.max(0, dmg - youPay);
-    document.getElementById('calcResult').innerHTML = `
-      <div class="alert alert-dark border" role="alert" style="border-color:#27304a;">
-        <div><strong>Out-of-pocket:</strong> $${youPay.toFixed(2)}</div>
-        <div><strong>Insurer pays (est.):</strong> $${insurerPays.toFixed(2)}</div>
-      </div>
-    `;
-  });
-
-  // FAQs quick-pick → prefill & send
-  document.getElementById('faqList').addEventListener('click', (e) => {
-    if (e.target && e.target.matches('.list-group-item')) {
-      const q = e.target.textContent.trim();
-      // Prefer chat input if chat started
-      const target = document.body.classList.contains('chat-started') ? document.getElementById('message2') : document.getElementById('message');
-      target.value = q;
-      // If a policy is already selected, auto-send
-      if (selectedDoc) {
-        if (document.body.classList.contains('chat-started')) {
-          nextAsk();
-        } else {
-          firstAsk();
-        }
-      } else {
-        // nudge to select a policy first
-        const m = bootstrap.Modal.getOrCreateInstance(docsModal);
-        m.show();
-        loadFiles();
-      }
-      bootstrap.Modal.getInstance(document.getElementById('faqsModal')).hide();
-      quickMenu.hide();
-    }
-  });
-
-  // Contact Support → open mailto with prefilled subject/body
-  document.getElementById('supportSend').addEventListener('click', (e) => {
-    const name  = encodeURIComponent(document.getElementById('supportName').value || '');
-    const email = encodeURIComponent(document.getElementById('supportEmail').value || '');
-    const msg   = encodeURIComponent(document.getElementById('supportMsg').value || '');
-    const subject = encodeURIComponent('Insurance Assistant Support');
-    const body = encodeURIComponent(`Name: ${name}\nEmail: ${email}\n\n${msg}`);
-    e.currentTarget.href = `mailto:support@example.com?subject=${subject}&body=${body}`;
-  });
-
-  // hero inputs
-  const heroInput = document.getElementById('message');
-  const heroSend  = document.getElementById('send');
-  const docBtnHero = document.getElementById('docBtnHero');
-  const docPillHero = document.getElementById('docPillHero');
-
-  // chat area
-  const thread = document.getElementById('thread');
-  const chatInput = document.getElementById('message2');
-  const chatSend  = document.getElementById('send2');
-  const docBtnChat = document.getElementById('docBtnChat');
-  const docPillChat = document.getElementById('docPillChat');
-
-  // modal + file list
-  const docsModal = document.getElementById('docsModal');
-  const filesDiv = document.getElementById('files');
-  const refreshBtn = document.getElementById('btn-refresh');
-  const reindexBtn = document.getElementById('btn-reindex');
-  const uploadForm = document.getElementById('upload-form');
-  const fileInput  = document.getElementById('file');
-
-  // ------- helpers -------
-  function setSelectedDoc(name) {
-    selectedDoc = name || null;
-    const has = !!selectedDoc;
-    heroSend.disabled = !has;
-    chatSend.disabled = !has;
-
-    // pill updates
-    if (document.getElementById('docPillHero')) {
-      const el = document.getElementById('docPillHero');
-      el.textContent = has ? selectedDoc : 'No policy selected';
-      el.classList.toggle('bad', !has);
-    }
-    if (document.getElementById('docPillChat')) {
-      const el = document.getElementById('docPillChat');
-      el.textContent = has ? selectedDoc : 'No policy selected';
-      el.classList.toggle('bad', !has);
-    }
-  }
-
-  function addBubble(text, who='bot') {
-    const div = document.createElement('div');
-    div.className = 'bubble ' + (who === 'user' ? 'user' : 'bot');
-    div.textContent = text || '';
-    thread.appendChild(div);
-    div.scrollIntoView({behavior:'smooth', block:'end'});
-    return div; // return node so we can append streamed chunks
-  }
-
-  async function streamAnswer(q) {
-    // ensure only one stream at a time
-    if (aborter) aborter.abort();
-    aborter = new AbortController();
-
-    // create/keep a single bot bubble we append into
-    const botDiv = addBubble('', 'bot');
-
-    try {
-      const res = await fetch('/api/chat/stream/', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ message: q, doc: selectedDoc }),
-        signal: aborter.signal
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        botDiv.textContent = t || ('HTTP ' + res.status);
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const {value, done} = await reader.read();
-        if (done) break;
-        botDiv.textContent += decoder.decode(value, {stream: true});
-        botDiv.scrollIntoView({behavior:'smooth', block:'end'});
-      }
-    } catch (e) {
-      if (e.name === 'AbortError') {
-        botDiv.textContent += ' [stopped]';
-      } else {
-        botDiv.textContent = 'Error: ' + e.message;
-      }
-    } finally {
-      aborter = null;
-    }
-  }
-
-  async function firstAsk() {
-    const q = heroInput.value.trim();
-    if (!q || !selectedDoc) return;
-    body.classList.add('chat-started');   // fade hero, show chat panel
-    addBubble(q, 'user');
-    heroInput.value = '';
-    chatInput.focus();
-    await streamAnswer(q);
-  }
-
-  async function nextAsk() {
-    const q = chatInput.value.trim();
-    if (!q || !selectedDoc) return;
-    addBubble(q, 'user');
-    chatInput.value = '';
-    await streamAnswer(q);
-  }
-
-  // attach events
-  heroSend.addEventListener('click', firstAsk);
-  heroInput.addEventListener('keydown', e => { if (e.key === 'Enter') firstAsk(); });
-  chatSend.addEventListener('click', nextAsk);
-  chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') nextAsk(); });
-
-  // open modal from both icon buttons
-  [docBtnHero, docBtnChat].forEach(btn => btn?.addEventListener('click', () => {
-    const m = bootstrap.Modal.getOrCreateInstance(docsModal);
-    m.show();
-    loadFiles();
-  }));
-
-  // Optional: a "Stop" shortcut (Esc key)
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && aborter) aborter.abort();
-  });
-
-  // ------- files modal logic (unchanged) -------
-  async function loadFiles() {
-    filesDiv.innerHTML = '<div class="list-group-item bg-transparent text-secondary">Loading…</div>';
-    const res = await fetch('/api/files/');
-    const data = await res.json();
-    filesDiv.innerHTML = '';
-
-    (data.files || []).forEach(f => {
-      const row = document.createElement('div');
-      row.className = 'list-group-item d-flex justify-content-between align-items-center bg-transparent';
-      row.innerHTML = `
-        <span>📄 ${f.name}</span>
-        <div class="d-flex gap-2">
-          <button class="btn btn-sm btn-outline-success">Select</button>
-          <a class="btn btn-sm btn-outline-secondary" href="${f.url}" target="_blank">Open</a>
-        </div>
-      `;
-      row.querySelector('button').addEventListener('click', () => {
-        setSelectedDoc(f.name);
-        bootstrap.Modal.getInstance(docsModal).hide();
-      });
-      filesDiv.appendChild(row);
-    });
-
-    if ((data.files || []).length === 0) {
-      filesDiv.innerHTML = '<div class="list-group-item bg-transparent text-secondary">No documents found. Upload one below, then click Rebuild Index.</div>';
-    }
-  }
-
-  document.getElementById('btn-refresh').addEventListener('click', loadFiles);
-
-  document.getElementById('btn-reindex').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-reindex');
-    btn.disabled = true; btn.textContent = 'Rebuilding…';
-    try {
-      const res = await fetch('/api/reindex/', { method: 'POST' });
-      const data = await res.json();
-      alert(data.ok ? 'Index rebuilt.' : ('Reindex failed: ' + (data.error || 'Unknown error')));
-      await loadFiles();
-    } catch (e) {
-      alert('Reindex failed: ' + e.message);
-    } finally {
-      btn.disabled = false; btn.textContent = 'Rebuild Index';
-    }
-  });
-
-  document.getElementById('upload-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!fileInput.files.length) return;
-    const fd = new FormData();
-    fd.append('file', fileInput.files[0]);
-    try {
-      const res = await fetch('/api/files/upload/', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Upload failed');
-      fileInput.value = '';
-      alert('Uploaded. Click “Rebuild Index” to include it.');
-      await loadFiles();
-      // auto-select the uploaded file
-      setSelectedDoc(data.saved_as);
-    } catch (err) {
-      alert('Upload error: ' + err.message);
-    }
-  });
-
-  // Initialize with no policy
-  setSelectedDoc(null);
-</script>
-
+  <script src="{% static 'chat/script.js' %}" defer></script>
 </body>
 </html>

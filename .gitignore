@@ -3,3 +3,7 @@
 *.index
 *.pkl
 *.sqlite3
+*.pt
+*.jpeg
+*.jpg
+*.png
