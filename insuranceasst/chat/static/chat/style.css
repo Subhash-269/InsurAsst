@@ -96,3 +96,27 @@ body, html { height: 100%; }
 @keyframes bubbleIn {
   to { opacity: 1; transform: none; }
 }
+
+/* Applies to all images shown in chat (user or bot) */
+.bubble img {
+  max-width: 100%;
+  max-height: 280px;   /* adjust as needed */
+  width: auto;
+  height: auto;
+  border-radius: 0.75rem;
+  display: block;
+  margin: 0.25rem 0;
+  object-fit: cover;   /* or 'contain' if you prefer full view */
+  border: 1px solid #2b2f3b;
+  background-color: #111318;
+}
+
+/* Optional: slightly different treatment for uploaded (user) vs. AI annotated */
+.bubble.user img {
+  max-height: 200px;
+}
+
+.bubble.bot img {
+  max-height: 300px;
+  box-shadow: 0 0 0 1px #1f2230, 0 2px 8px rgba(0,0,0,.4);
+}

@@ -435,3 +435,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---------- INIT ----------
   setSelectedDoc(null);
 });
+
+document.addEventListener('click', e => {
+  if (e.target.tagName === 'IMG' && e.target.closest('.bubble')) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.8);z-index:9999;
+    `;
+    const img = document.createElement('img');
+    img.src = e.target.src;
+    img.style.cssText = 'max-width:90%;max-height:90%;border-radius:1rem;';
+    overlay.appendChild(img);
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+  }
+});
