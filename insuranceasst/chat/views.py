@@ -67,7 +67,7 @@ def chat_api(request):
         q = request.GET.get("q")
         doc = request.GET.get("doc") or None
         if q:
-            return JsonResponse({"answer": _get_rag().search_and_summarize(q, top_k=8, doc=doc)})
+            return JsonResponse({"answer": _get_rag().search_and_summarize(q, top_k=5, doc=doc)})
         return JsonResponse({"hint": "POST JSON {message, doc?} or GET /api/chat/?q=...&doc=<filename>"})
 
     if request.method != "POST":
@@ -79,7 +79,7 @@ def chat_api(request):
         doc = (payload.get("doc") or "").strip() or None
         if not msg:
             return JsonResponse({"error": "Empty message"}, status=400)
-        answer = _get_rag().search_and_summarize(msg, top_k=8, doc=doc)
+        answer = _get_rag().search_and_summarize(msg, top_k=5, doc=doc)
         return JsonResponse({"answer": answer})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -172,7 +172,7 @@ def chat_stream(request):
         rag = _get_rag()
 
         # Build retrieval context (mirror of search_and_summarize)
-        results = rag.vectorstore.query(msg, top_k=8, allowed_sources=[doc] if doc else None)
+        results = rag.vectorstore.query(msg, top_k=5, allowed_sources=[doc] if doc else None)
         texts = [r.get("metadata", {}).get("text", "") for r in results if r.get("metadata")]
         uniq, seen = [], set()
         for t in texts:
