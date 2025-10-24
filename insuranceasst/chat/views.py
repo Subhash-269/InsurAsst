@@ -10,6 +10,8 @@ from backend.search__ import RAGSearch
 from django.http import StreamingHttpResponse
 import uuid, cv2, numpy as np
 from ultralytics import YOLO
+import shutil
+
 
 
 # ---------- RAG singleton ----------
@@ -308,5 +310,61 @@ def vision_analyze(request):
             "detections": detections,
             "summary": summary
         })
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+    
+@csrf_exempt
+def delete_files(request):
+    """
+    POST JSON: { "names": ["file1.pdf", "file2.docx", ...] }
+    Deletes files from MEDIA_ROOT/data (same directory used by list_files/upload_file).
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        names = payload.get("names") or []
+        if not isinstance(names, list) or not names:
+            return JsonResponse({"ok": False, "error": "No filenames provided"}, status=400)
+
+        base = _data_dir()
+        base.mkdir(parents=True, exist_ok=True)
+
+        deleted = []
+        missing = []
+        for name in names:
+            # prevent directory traversal
+            name = os.path.basename(name)
+            target = (base / name)
+            if not target.exists():
+                missing.append(name)
+                continue
+            try:
+                target.unlink()
+                deleted.append(name)
+            except Exception as e:
+                missing.append(f"{name} ({e})")
+
+        return JsonResponse({"ok": True, "deleted": deleted, "missing": missing})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
+
+
+# --- clear vector DB (FAISS dir) ---
+@csrf_exempt
+def clear_vectors(request):
+    """
+    POST: wipe the FAISS_DIR (recreate empty). Adjust if you use a hosted DB.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    try:
+        faiss_dir = Path(getattr(settings, "FAISS_DIR", "faiss_store"))
+        if faiss_dir.exists():
+            shutil.rmtree(faiss_dir)
+        faiss_dir.mkdir(parents=True, exist_ok=True)
+        return JsonResponse({"ok": True, "message": "Vector DB cleared."})
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)

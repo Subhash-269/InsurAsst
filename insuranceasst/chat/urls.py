@@ -10,6 +10,8 @@ urlpatterns = [
     path('api/files/', views.list_files, name='list_files'),
     path('api/files/upload/', views.upload_file, name='upload_file'),
     path('api/reindex/', views.reindex, name='reindex'),
-    path('api/vision/analyze/', views.vision_analyze, name='vision_analyze'),  # <-- NEW
+    path('api/vision/analyze/', views.vision_analyze, name='vision_analyze'),
+    path('api/files/delete/', views.delete_files, name='delete_files'),
+    path('api/vectors/clear/', views.clear_vectors, name='clear_vectors'),
 
 ]

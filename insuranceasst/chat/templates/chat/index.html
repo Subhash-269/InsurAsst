@@ -222,31 +222,52 @@
     </section>
   </main>
 
-  <!-- Documents modal: select/upload/reindex -->
-  <div class="modal fade" id="docsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-      <div class="modal-content" style="background:#151822; border-color:#222636;">
-        <div class="modal-header">
-          <h5 class="modal-title">Select a policy document</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+  <!-- Documents modal: select/upload/reindex/clear/delete -->
+<div class="modal fade" id="docsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content" style="background:#151822; border-color:#222636;">
+      <div class="modal-header">
+        <h5 class="modal-title">Manage documents & policy selection</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Toolbar -->
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <button id="btn-refresh" class="btn btn-outline-secondary btn-sm">Refresh list</button>
+          <button id="btn-reindex" class="btn btn-outline-primary btn-sm">Rebuild Index</button>
+          <button id="btn-clear-vdb" class="btn btn-outline-warning btn-sm">Clear Vector DB</button>
+          <button id="btn-delete" class="btn btn-outline-danger btn-sm" disabled>Delete selected</button>
         </div>
-        <div class="modal-body">
-          <div class="d-flex gap-2 mb-3">
-            <button id="btn-refresh" class="btn btn-outline-secondary btn-sm">Refresh list</button>
-            <button id="btn-reindex" class="btn btn-outline-primary btn-sm">Rebuild Index</button>
+
+        <!-- Upload -->
+        <form id="upload-form" class="mb-3">
+          <div class="input-group">
+            <input type="file" class="form-control" id="file" name="file" accept=".pdf,.txt,.docx,.csv,.xlsx,.json" />
+            <button class="btn btn-primary" type="submit">Upload</button>
           </div>
-          <form id="upload-form" class="mb-3">
-            <div class="input-group">
-              <input type="file" class="form-control" id="file" name="file" accept=".pdf,.txt,.docx,.csv,.xlsx,.json" />
-              <button class="btn btn-primary" type="submit">Upload</button>
-            </div>
-            <div class="form-text muted">Supported: pdf, txt, docx, csv, xlsx, json</div>
-          </form>
-          <div id="files" class="list-group"></div>
+          <div class="form-text muted">Supported: pdf, txt, docx, csv, xlsx, json</div>
+        </form>
+
+        <!-- File list -->
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" value="" id="chk-all">
+            <label class="form-check-label" for="chk-all">Select all</label>
+          </div>
+          <span id="files-count" class="text-secondary small">0 files</span>
+        </div>
+
+        <div id="files" class="list-group"></div>
+
+        <div class="form-text mt-3">
+          <strong>Tip:</strong> pick one file as your current policy; use <em>Rebuild Index</em> after uploads.  
+          <em>Clear Vector DB</em> wipes embeddings only (documents remain). <em>Delete selected</em> removes files.
         </div>
       </div>
     </div>
   </div>
+</div>
 
   <!-- JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

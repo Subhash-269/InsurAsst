@@ -56,6 +56,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const supportMsg   = document.getElementById('supportMsg');
   const supportSend  = document.getElementById('supportSend');
 
+  const clearVdbBtn = document.getElementById('btn-clear-vdb');
+  const deleteBtn   = document.getElementById('btn-delete');
+  const chkAll      = document.getElementById('chk-all');
+  const filesCount  = document.getElementById('files-count');
+
+  let selectedNames = new Set();
+
+  function updateDeleteUI() {
+    deleteBtn.disabled = selectedNames.size === 0;
+  }
+
   // ---------- HELPERS ----------
   function setSelectedDoc(name) {
     selectedDoc = name || null;
@@ -270,25 +281,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const data = await res.json();
     filesDiv.innerHTML = '';
 
-    (data.files || []).forEach(f => {
+    selectedNames.clear();
+    updateDeleteUI();
+    if (chkAll) chkAll.checked = false;
+
+    const files = (data.files || []);
+    if (filesCount) filesCount.textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
+
+    files.forEach(f => {
       const row = document.createElement('div');
       row.className = 'list-group-item d-flex justify-content-between align-items-center bg-transparent file-item';
+      const safeName = f.name;
+
       row.innerHTML = `
-        <span>📄 ${f.name}</span>
+        <div class="d-flex align-items-center gap-2">
+          <input class="form-check-input file-chk" type="checkbox" data-name="${safeName}">
+          <span>📄 ${safeName}</span>
+        </div>
         <div class="d-flex gap-2">
           <button class="btn btn-sm btn-outline-success">Select</button>
           <a class="btn btn-sm btn-outline-secondary" href="${f.url}" target="_blank">Open</a>
         </div>
       `;
-      row.querySelector('button').addEventListener('click', () => {
-        setSelectedDoc(f.name);
+
+      // Select as active policy
+      row.querySelector('.btn-outline-success').addEventListener('click', () => {
+        setSelectedDoc(safeName);
         const modal = bootstrap.Modal.getInstance(docsModal) || bootstrap.Modal.getOrCreateInstance(docsModal);
         modal.hide();
       });
+
+      // Checkbox -> selected set
+      row.querySelector('.file-chk').addEventListener('change', (e) => {
+        const name = e.currentTarget.getAttribute('data-name');
+        if (e.currentTarget.checked) selectedNames.add(name);
+        else selectedNames.delete(name);
+        updateDeleteUI();
+      });
+
       filesDiv.appendChild(row);
     });
 
-    if ((data.files || []).length === 0) {
+    if (files.length === 0) {
       filesDiv.innerHTML = '<div class="list-group-item bg-transparent text-secondary">No documents found. Upload one below, then click Rebuild Index.</div>';
     }
   }
@@ -298,6 +332,62 @@ document.addEventListener('DOMContentLoaded', () => {
   heroInput?.addEventListener('keydown', e => { if (e.key === 'Enter') firstAsk(); });
   chatSend?.addEventListener('click', nextAsk);
   chatInput?.addEventListener('keydown', e => { if (e.key === 'Enter') nextAsk(); });
+
+  chkAll?.addEventListener('change', () => {
+  const checks = filesDiv.querySelectorAll('.file-chk');
+  selectedNames.clear();
+  checks.forEach(chk => {
+    chk.checked = chkAll.checked;
+    if (chkAll.checked) selectedNames.add(chk.getAttribute('data-name'));
+  });
+  updateDeleteUI();
+});
+
+deleteBtn?.addEventListener('click', async () => {
+  if (selectedNames.size === 0) return;
+  if (!confirm(`Delete ${selectedNames.size} file(s)? This cannot be undone.`)) return;
+
+  deleteBtn.disabled = true;
+  deleteBtn.textContent = 'Deleting…';
+  try {
+    const r = await fetch('/api/files/delete/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names: Array.from(selectedNames) })
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Delete failed');
+
+    // If the selected policy was deleted, clear it
+    if (selectedDoc && selectedNames.has(selectedDoc)) setSelectedDoc(null);
+
+    await loadFiles();
+    alert(`Deleted: ${j.deleted.length}${j.missing.length ? ` | Missing: ${j.missing.join(', ')}` : ''}`);
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    deleteBtn.disabled = false;
+    deleteBtn.textContent = 'Delete selected';
+  }
+});
+
+clearVdbBtn?.addEventListener('click', async () => {
+  if (!confirm('Clear the entire vector database (FAISS)? This cannot be undone.')) return;
+  clearVdbBtn.disabled = true;
+  clearVdbBtn.textContent = 'Clearing…';
+  try {
+    const r = await fetch('/api/vectors/clear/', { method: 'POST' });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Failed to clear vector DB');
+    alert('Vector DB cleared.');
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    clearVdbBtn.disabled = false;
+    clearVdbBtn.textContent = 'Clear Vector DB';
+  }
+});
+
 
   [docBtnHero, docBtnChat].forEach(btn => btn?.addEventListener('click', () => {
     const m = bootstrap.Modal.getOrCreateInstance(docsModal);
