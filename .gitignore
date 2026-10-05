@@ -7,3 +7,8 @@
 *.jpeg
 *.jpg
 *.png
+# README screenshots
+!docs/screenshots/*.png
+
+# Local evaluation runs (screenshots + transcripts), not part of the repo
+eval-runs/
