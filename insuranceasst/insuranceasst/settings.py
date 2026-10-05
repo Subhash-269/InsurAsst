@@ -28,9 +28,13 @@ DEBUG = True
 ALLOWED_HOSTS = []
 
 # RAG defaults
-FAISS_DIR = "faiss_store"
+FAISS_DIR = BASE_DIR / "faiss_store"
 LLM_BACKEND = "ollama"   # or "hf"
-LLM_MODEL = "mistral"    # or your local model name
+LLM_MODEL = "qwen2.5:7b"  # Ollama model name; "mistral" also works
+RAG_HYBRID = False        # fuse BM25 keyword search with vector search (evaluated: no gain, off)
+RAG_EXPAND_QUERY = False  # LLM rewrites the customer's story into policy terms (evaluated: no gain, off)
+RAG_NEIGHBORS = True      # extend each retrieved chunk with the next chunk of the same section
+RAG_ROUTE = True          # LLM picks the relevant coverage sections from a catalogue of the policy first
 # Serve files from ./data for previews/uploads (DEV only)
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "data"

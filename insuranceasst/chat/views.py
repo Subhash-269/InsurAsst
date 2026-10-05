@@ -9,6 +9,7 @@ from django.core.files.storage import FileSystemStorage
 from backend.search__ import RAGSearch
 from django.http import StreamingHttpResponse
 import uuid, cv2, numpy as np
+import torch
 from ultralytics import YOLO
 import shutil
 
@@ -23,28 +24,17 @@ def _get_rag():
             persist_dir=getattr(settings, "FAISS_DIR", "faiss_store"),
             backend=getattr(settings, "LLM_BACKEND", "ollama"),
             model_name=getattr(settings, "LLM_MODEL", "mistral"),
+            data_dir=_data_dir(),
+            hybrid=getattr(settings, "RAG_HYBRID", False),
+            expand_query=getattr(settings, "RAG_EXPAND_QUERY", False),
+            neighbors=getattr(settings, "RAG_NEIGHBORS", False),
+            route=getattr(settings, "RAG_ROUTE", False),
         )
     return _rag
 
 # ---------- Pages ----------
-def index(request):
-    # Dark theme is purely front-end (CSS)
-    return render(request, "chat/index.html")
-
 def health(request):
     return JsonResponse({"ok": True})
-
-# NEW: list indexed docs (from FAISS metadata)
-def indexed_docs(request):
-    if request.method != "GET":
-        return JsonResponse({"error": "GET only"}, status=405)
-    try:
-        rag = _get_rag()
-        items = rag.vectorstore.list_indexed_sources()
-        # {source, name, count}
-        return JsonResponse({"docs": items})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
 
 def _list_indexed_docs():
     # Return just the file basenames to match the filter
@@ -81,7 +71,7 @@ def chat_api(request):
         doc = (payload.get("doc") or "").strip() or None
         if not msg:
             return JsonResponse({"error": "Empty message"}, status=400)
-        answer = _get_rag().search_and_summarize(msg, top_k=5, doc=doc)
+        answer = _get_rag().search_and_summarize(msg, top_k=5, doc=doc, history=_clean_history(payload.get("history")))
         return JsonResponse({"answer": answer})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -152,15 +142,28 @@ def reindex(request):
         store.build_from_documents(docs)
         if hasattr(store, "save"):
             store.save()
+        # the cached RAG instance still holds the old index in memory
+        if _rag is not None:
+            _rag.reload_index()
         return JsonResponse({"ok": True, "message": "FAISS index rebuilt.", "doc_count": len(docs)})
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
+def _clean_history(raw, max_turns: int = 6, max_chars: int = 1500):
+    """Last few {role, content} chat turns from the client, trimmed so the prompt stays within the LLM window."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for m in raw[-max_turns:]:
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant"):
+            out.append({"role": m["role"], "content": str(m.get("content") or "")[:max_chars]})
+    return out
+
 @csrf_exempt
 def chat_stream(request):
     """
-    POST { "message": "...", "doc": "Allstate.pdf" }
-    Streams back the answer in chunks.
+    POST { "message": "...", "doc": "Allstate.pdf", "history": [{role, content}...]?, "facts": "..."? }
+    Streams back the answer in chunks; citations in the X-Sources header.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST only"}, status=405)
@@ -172,48 +175,30 @@ def chat_stream(request):
             return JsonResponse({"error": "Empty message"}, status=400)
 
         rag = _get_rag()
+        history = _clean_history(payload.get("history"))
+        facts = str(payload.get("facts") or "")[:1000] or None
 
-        # Build retrieval context (mirror of search_and_summarize)
-        results = rag.vectorstore.query(msg, top_k=5, allowed_sources=[doc] if doc else None)
-        texts = [r.get("metadata", {}).get("text", "") for r in results if r.get("metadata")]
-        uniq, seen = [], set()
-        for t in texts:
-            t2 = t.strip()
-            if t2 and t2 not in seen:
-                seen.add(t2)
-                uniq.append(t2)
-        context = "\n\n---\n\n".join(uniq)[:8000]
+        hits, messages = rag.prepare(msg, doc=doc, history=history, facts=facts)
+        context = rag.context_from(hits)
+        print("###Context",context)
         if not context:
             # simple immediate response
             return StreamingHttpResponse(
                 iter(["No matches found in the selected policy. Try Rebuild Index or choose another document."]),
                 content_type="text/plain",
             )
-        prompt = rag._build_prompt(msg, context)  # uses the helper already in your class
 
         def gen():
-            backend = getattr(settings, "LLM_BACKEND", "ollama").lower()
-            if backend == "ollama":
-                # True streaming from Ollama
-                import ollama
-                model = getattr(rag.llm, "model", getattr(settings, "LLM_MODEL", "mistral"))
-                for part in ollama.chat(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    stream=True,
-                    options={"temperature": 0.2, "top_p": 0.95},
-                ):
-                    # parts have shape: {"message": {"content": "..."}, ...}
-                    chunk = (part.get("message") or {}).get("content") or ""
-                    if chunk:
-                        yield chunk
-            else:
-                # Fallback: generate full text, then drip it out as "fake" streaming
-                text = rag.llm.generate(prompt, max_new_tokens=256)
-                for piece in text.split():
-                    yield piece + " "
-            # done
-        return StreamingHttpResponse(gen(), content_type="text/plain")
+            # Ollama streams for real; the HF backend generates fully, then drips words out
+            try:
+                yield from rag.llm.stream_chat(messages)
+            except Exception as e:
+                # headers are already sent, so report the failure in-band
+                yield f"\n[Error: {e}]"
+        resp = StreamingHttpResponse(gen(), content_type="text/plain")
+        # citations travel in a header so the body can stream immediately (json.dumps keeps it ASCII)
+        resp["X-Sources"] = json.dumps(rag.sources_from(hits))
+        return resp
     except Exception as e:
         return StreamingHttpResponse(iter([f"Error: {e}"]), content_type="text/plain", status=500)
 
@@ -245,6 +230,7 @@ def vision_analyze(request):
     if "image" not in request.FILES:
         return JsonResponse({"error": "No 'image' file found"}, status=400)
 
+    raw_path = ann_path = None
     try:
         img_file = request.FILES["image"]
         # save original
@@ -257,9 +243,10 @@ def vision_analyze(request):
             for chunk in img_file.chunks():
                 f.write(chunk)
 
-        # run YOLO seg
+        # run YOLO seg (GPU 0 if available, otherwise CPU)
         model = _get_yolo()
-        results = model.predict(source=str(raw_path), imgsz=640, conf=0.25, device=0)
+        device = 0 if torch.cuda.is_available() else "cpu"
+        results = model.predict(source=str(raw_path), imgsz=640, conf=0.25, device=device)
         res = results[0]
 
         # annotated image (with masks/boxes/labels)
@@ -294,13 +281,18 @@ def vision_analyze(request):
         fact_str = json.dumps(facts, indent=2)
 
         # readable summary with your existing LLM (Mistral)
-        rag = _get_rag()
         summary_prompt = (
             "You are an auto-claims assistant. Given these vision detections, write a short, plain-English summary "
             "of the observed damage (1-3 sentences), mentioning the types and approximate counts. Be neutral and factual.\n\n"
             f"Detections JSON:\n{fact_str}\n\nSummary:"
         )
-        summary = rag.llm.generate(summary_prompt, max_new_tokens=120).strip()
+        try:
+            summary = _get_rag().llm.generate(summary_prompt, max_new_tokens=120).strip()
+        except Exception as e:
+            # LLM unavailable: still return the detections with a plain summary
+            print(f"[WARN] LLM summary failed: {e}")
+            found = ", ".join(f"{v} {k}" for k, v in facts["counts"].items())
+            summary = f"Detected damage: {found}." if found else "No damage detected in this photo."
 
         rel_ann = ann_path.relative_to(_media_root()).as_posix()
         return JsonResponse({
@@ -311,6 +303,10 @@ def vision_analyze(request):
             "summary": summary
         })
     except Exception as e:
+        # don't leave orphaned uploads behind when analysis fails
+        for p in (raw_path, ann_path):
+            if p is not None:
+                p.unlink(missing_ok=True)
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
     
 @csrf_exempt
@@ -365,6 +361,10 @@ def clear_vectors(request):
         if faiss_dir.exists():
             shutil.rmtree(faiss_dir)
         faiss_dir.mkdir(parents=True, exist_ok=True)
+        # drop the in-memory copy too, otherwise answers keep coming from the old index
+        if _rag is not None:
+            _rag.vectorstore.index = None
+            _rag.vectorstore.metadata = []
         return JsonResponse({"ok": True, "message": "Vector DB cleared."})
     except Exception as e:
         return JsonResponse({"ok": False, "error": str(e)}, status=500)

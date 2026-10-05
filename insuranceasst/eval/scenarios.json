@@ -1,0 +1,434 @@
+{
+  "_about": "Policy Q&A test set. Pages are 1-based PDF pages (what the app cites), not the page numbers printed in the policy. 'include' is a list of groups: every group must match (any phrase in a group, case-insensitive). 'exclude' are regexes that must not match. 'ask' / 'ask_not' apply only to the clarifying questions at the end of the answer.",
+  "scenarios": [
+    {
+      "id": "A1-hit-and-run-parked",
+      "policy": "Allstate.pdf",
+      "facts": "Photo of the customer's vehicle analyzed by a damage detector: 1 dent, 1 crack.",
+      "turns": [
+        {
+          "user": "Someone hit the front of my parked pickup in a grocery store parking lot and drove off. No note, no witnesses. Am I covered?",
+          "truth": "Collision (Coverage DD, p.14) covers it if purchased; deductible applies. Uninsured Motorists (SS, p.11-12) is bodily injury only, so it does not pay for the truck.",
+          "pages": [
+            14
+          ],
+          "include": [
+            [
+              "collision"
+            ]
+          ],
+          "exclude": [
+            "(covered|cover it|pays?|apply|applies) (under|by|through) (the |your )?(\"|')?uninsured",
+            "uninsured (auto|motorists?)[^.]{0,40}(covers?|pays? for|would cover)[^.]{0,30}(damage|truck|vehicle|car|pickup)"
+          ],
+          "questions": "required",
+          "ask": [
+            "collision",
+            "injur",
+            "hurt"
+          ]
+        },
+        {
+          "user": "I have collision and comprehensive on the truck. Nobody was hurt and I wasn't in it.",
+          "truth": "Collision applies with the deductible; UM doesn't apply (no injury).",
+          "pages": [
+            14
+          ],
+          "include": [
+            [
+              "collision"
+            ],
+            [
+              "deductible"
+            ]
+          ],
+          "exclude": [
+            "(covered|cover it|pays?|apply|applies) (under|by|through) (the |your )?(\"|')?uninsured",
+            "uninsured (auto|motorists?)[^.]{0,40}(covers?|pays? for|would cover)[^.]{0,30}(damage|truck|vehicle|car|pickup)"
+          ],
+          "questions": "optional",
+          "ask_not": [
+            "do you have (a |any )?collision",
+            "have collision",
+            "anyone (hurt|injured)",
+            "was anyone",
+            "were you (hurt|injured)",
+            "injur(y|ies|ed)\\?"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A2-deer-strike",
+      "policy": "Allstate.pdf",
+      "turns": [
+        {
+          "user": "I hit a deer on the highway last night. The front bumper and a headlight are smashed. Which coverage handles this?",
+          "truth": "Comprehensive (HH, p.14): collision with a bird or animal is covered under comprehensive.",
+          "pages": [
+            14
+          ],
+          "include": [
+            [
+              "comprehensive"
+            ]
+          ],
+          "exclude": [
+            "(covered|handled) (under|by) (your )?collision coverage"
+          ],
+          "questions": "optional",
+          "ask": [
+            "comprehensive"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A3-windshield",
+      "policy": "Allstate.pdf",
+      "turns": [
+        {
+          "user": "A rock flew off a truck and cracked my windshield. Is that covered, and do I have to pay the deductible?",
+          "truth": "Comprehensive (HH, p.14) covers glass breakage; by agreement the deductible isn't subtracted if the glass is repaired rather than replaced (p.15).",
+          "pages": [
+            14,
+            15
+          ],
+          "include": [
+            [
+              "comprehensive"
+            ],
+            [
+              "repair"
+            ]
+          ],
+          "exclude": [],
+          "questions": "optional",
+          "ask": [
+            "comprehensive",
+            "repair",
+            "replace"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A4-theft",
+      "policy": "Allstate.pdf",
+      "turns": [
+        {
+          "user": "My car was stolen from my driveway overnight. What do I need to do, and will Allstate help me get around?",
+          "truth": "Report theft promptly to the police (p.18); with comprehensive, transportation is repaid up to $10/day, max $300, starting 48 hours after reporting the theft (p.16).",
+          "pages": [
+            16,
+            18
+          ],
+          "include": [
+            [
+              "police"
+            ],
+            [
+              "$10",
+              "10 a day",
+              "$300",
+              "48 hours"
+            ]
+          ],
+          "exclude": [],
+          "questions": "optional",
+          "ask": [
+            "comprehensive",
+            "rental"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A5-rental",
+      "policy": "Allstate.pdf",
+      "turns": [
+        {
+          "user": "My car is in the body shop after a collision. Will my policy pay for a rental car, and for how long?",
+          "truth": "Rental Reimbursement (UU, p.15) if purchased and the loss involves collision/comprehensive; daily cap on Declarations; no mileage; ends at completion of repairs or 30 full days.",
+          "pages": [
+            15
+          ],
+          "include": [
+            [
+              "rental reimbursement",
+              "coverage uu"
+            ],
+            [
+              "30",
+              "thirty"
+            ]
+          ],
+          "exclude": [],
+          "questions": "optional",
+          "ask": [
+            "rental",
+            "declarations",
+            "uu"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A6-breakdown-tow",
+      "policy": "Allstate.pdf",
+      "turns": [
+        {
+          "user": "My transmission died on the highway and I had to get towed. Does my policy cover the tow and the transmission repair?",
+          "truth": "Towing and Labor (JJ, p.15) pays towing/labor at the place of disablement if purchased; mechanical breakdown / wear and tear is excluded (p.17), so the transmission repair isn't covered.",
+          "pages": [
+            15,
+            17
+          ],
+          "include": [
+            [
+              "tow"
+            ],
+            [
+              "wear and tear",
+              "mechanical",
+              "breakdown"
+            ]
+          ],
+          "exclude": [
+            "transmission repair (is|would be|will be) covered"
+          ],
+          "questions": "optional",
+          "ask": [
+            "towing",
+            "jj"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A7-uninsured-injury",
+      "policy": "Allstate.pdf",
+      "turns": [
+        {
+          "user": "An uninsured driver ran a red light and hit me. I broke my wrist. Can I claim for my injury?",
+          "truth": "Uninsured Motorists (SS, p.11) pays damages for bodily injury the insured is legally entitled to recover from the uninsured driver.",
+          "pages": [
+            11
+          ],
+          "include": [
+            [
+              "uninsured"
+            ],
+            [
+              "bodily injury",
+              "injury",
+              "injuries"
+            ]
+          ],
+          "exclude": [],
+          "questions": "optional",
+          "ask": [
+            "uninsured",
+            "medical"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A8-premium-out-of-scope",
+      "policy": "Allstate.pdf",
+      "turns": [
+        {
+          "user": "Will my premium go up if I file a claim?",
+          "truth": "The policy text doesn't address premium changes after a claim.",
+          "pages": [],
+          "include": [
+            [
+              "doesn't address",
+              "does not address",
+              "don't address",
+              "do not address",
+              "doesn't say",
+              "does not say",
+              "don't say",
+              "do not say",
+              "not mention",
+              "doesn't mention",
+              "does not mention",
+              "no information",
+              "not specified",
+              "doesn't specify",
+              "does not specify",
+              "not addressed",
+              "not covered in",
+              "not explicitly",
+              "does not state",
+              "doesn't state",
+              "does not indicate",
+              "doesn't indicate"
+            ]
+          ],
+          "exclude": [
+            "premium (will|would) (likely |probably )?(increase|go up|rise)"
+          ],
+          "questions": "optional"
+        }
+      ]
+    },
+    {
+      "id": "M1-hit-and-run-parked",
+      "policy": "MassachusettsAutomobilePolicy.pdf",
+      "turns": [
+        {
+          "user": "Someone hit my legally parked car and drove off. I couldn't get their plate. Am I covered?",
+          "truth": "Collision (Part 7, p.18) pays regardless of fault, minus deductible. Limited Collision (Part 8, p.20) won't pay if the other owner can't be identified. Notify police and insurer within 24 hours of a hit-and-run (p.36).",
+          "pages": [
+            18,
+            19,
+            20,
+            36
+          ],
+          "include": [
+            [
+              "collision"
+            ]
+          ],
+          "exclude": [
+            "limited collision (will|would|does) (pay|cover)"
+          ],
+          "questions": "required",
+          "ask": [
+            "limited collision",
+            "collision",
+            "part 7",
+            "part 8",
+            "injur",
+            "hurt"
+          ]
+        },
+        {
+          "user": "I only have Limited Collision, not full Collision.",
+          "truth": "Limited Collision won't pay because the other owner can't be identified (p.20).",
+          "pages": [
+            20
+          ],
+          "include": [
+            [
+              "not pay",
+              "won't pay",
+              "will not pay",
+              "cannot be identified",
+              "can't be identified",
+              "not covered",
+              "isn't covered",
+              "doesn't cover",
+              "does not cover",
+              "not be covered",
+              "wouldn't cover",
+              "would not cover"
+            ]
+          ],
+          "exclude": [
+            "(is|are|would be|will be) covered (under|by) (your )?limited collision"
+          ],
+          "questions": "optional",
+          "ask_not": [
+            "limited collision or",
+            "do you have (full |standard )?collision",
+            "full collision coverage\\?"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "M2-glass",
+      "policy": "MassachusettsAutomobilePolicy.pdf",
+      "turns": [
+        {
+          "user": "My windshield cracked from a stone on the highway. Do I have to pay my deductible?",
+          "truth": "Comprehensive (Part 9, p.21-22): glass breakage is a comprehensive loss and the deductible does not apply to glass breakage.",
+          "pages": [
+            21,
+            22
+          ],
+          "include": [
+            [
+              "comprehensive"
+            ],
+            [
+              "deductible does not apply",
+              "deductible doesn't apply",
+              "no deductible",
+              "not apply to glass",
+              "doesn't apply to glass",
+              "does not apply to glass",
+              "waive",
+              "won't have to pay",
+              "will not have to pay",
+              "don't have to pay",
+              "do not have to pay",
+              "not required to pay",
+              "doesn't have to be paid",
+              "not subtract"
+            ]
+          ],
+          "exclude": [],
+          "questions": "optional",
+          "ask": [
+            "comprehensive"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "M3-theft",
+      "policy": "MassachusettsAutomobilePolicy.pdf",
+      "turns": [
+        {
+          "user": "My car was stolen last night. What do I have to do and by when?",
+          "truth": "Within 24 hours notify both the police and the insurer (p.36); Comprehensive pays transportation $15/day up to $450 after the first 48 hours following the reports (p.22).",
+          "pages": [
+            36,
+            22
+          ],
+          "include": [
+            [
+              "24 hours"
+            ],
+            [
+              "police"
+            ]
+          ],
+          "exclude": [],
+          "questions": "optional",
+          "ask": [
+            "comprehensive"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "M4-default-deductible",
+      "policy": "MassachusettsAutomobilePolicy.pdf",
+      "turns": [
+        {
+          "user": "If I never picked a collision deductible, what is it?",
+          "truth": "Unless you selected a different amount, the law sets the deductible at $500 (Part 7, p.18).",
+          "pages": [
+            18,
+            20,
+            21
+          ],
+          "include": [
+            [
+              "$500",
+              "500"
+            ]
+          ],
+          "exclude": [],
+          "questions": "optional"
+        }
+      ]
+    }
+  ]
+}

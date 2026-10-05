@@ -1,6 +1,7 @@
 # backend/vectorstore.py
 import os
 import pickle
+import re
 from typing import List, Any, Dict, Optional
 
 import faiss
@@ -15,8 +16,8 @@ class FaissVectorStore:
         self,
         persist_dir: str = "faiss_store",
         embedding_model: str = "all-MiniLM-L6-v2",
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
+        chunk_size: int = 800,
+        chunk_overlap: int = 150,
     ):
         self.persist_dir = persist_dir
         os.makedirs(self.persist_dir, exist_ok=True)
@@ -39,20 +40,25 @@ class FaissVectorStore:
             model_name=self.embedding_model,
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
+            model=self.model,
         )
         chunks = emb_pipe.chunk_documents(documents)
         embeddings = emb_pipe.embed_chunks(chunks)
 
         metadatas: List[Dict[str, Any]] = []
         for ch in chunks:
-            src = None
+            src, page = None, None
             if getattr(ch, "metadata", None):
                 # common locations used by loaders
                 src = ch.metadata.get("source") or ch.metadata.get("file_path")
+                page = ch.metadata.get("page")  # 0-based, set by PyPDFLoader
             metadatas.append(
                 {
                     "text": ch.page_content,
                     "source": (src or "unknown"),
+                    "page": page,
+                    "page_end": ch.metadata.get("page_end", page) if getattr(ch, "metadata", None) else page,
+                    "section": ch.metadata.get("section", "") if getattr(ch, "metadata", None) else "",
                 }
             )
 
@@ -106,26 +112,49 @@ class FaissVectorStore:
     def _normalize_name(self, s: str) -> str:
         return (os.path.basename(s) if s else "").lower()
 
-    def query(self, query_text: str, top_k: int = 5, allowed_sources: Optional[List[str]] = None):
+    @staticmethod
+    def _tokens(text: str) -> List[str]:
+        return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+    def _bm25(self):
+        """Keyword index over section label + text, built lazily and rebuilt when the metadata changes."""
+        if getattr(self, "_bm25_for", None) is not self.metadata:
+            from rank_bm25 import BM25Okapi
+            corpus = [self._tokens(f"{m.get('section', '')} {m.get('text', '')}") for m in self.metadata]
+            self._bm25_index = BM25Okapi(corpus) if corpus else None
+            self._bm25_for = self.metadata
+        return self._bm25_index
+
+    def query(self, query_text: str, top_k: int = 5, allowed_sources: Optional[List[str]] = None,
+              hybrid: bool = False):
         """
-        If allowed_sources is provided (list of filenames), only return hits from those files.
+        Top_k chunks for the query. If allowed_sources is provided (list of filenames), only those files are searched.
+        hybrid=True fuses the vector ranking with a BM25 keyword ranking (reciprocal rank fusion).
         """
         print(f"[INFO] Querying vector store for: '{query_text}'")
+        if self.index is None or self.index.ntotal == 0:
+            return []
         query_emb = self.model.encode([query_text]).astype("float32")
+        # the index is small, so rank everything and filter afterwards; a fixed over-retrieve could
+        # be filled entirely by chunks from other files
+        raw = self.search(query_emb, top_k=self.index.ntotal)
 
-        # over-retrieve so filtering still returns enough
-        raw = self.search(query_emb, top_k=max(top_k * 5, 20))
+        allowed = {self._normalize_name(s) for s in allowed_sources} if allowed_sources else None
+        def ok(r):
+            return allowed is None or self._normalize_name((r.get("metadata") or {}).get("source", "")) in allowed
+        dense = [r for r in raw if ok(r)]
+        if not hybrid:
+            return dense[:top_k]
 
-        if not allowed_sources:
-            return raw[:top_k]
-
-        allowed = {self._normalize_name(s) for s in allowed_sources}
-        filtered = []
-        for r in raw:
-            meta = r.get("metadata") or {}
-            src = self._normalize_name(meta.get("source", ""))
-            if src in allowed:
-                filtered.append(r)
-            if len(filtered) >= top_k:
-                break
-        return filtered
+        bm25 = self._bm25()
+        scores = bm25.get_scores(self._tokens(query_text)) if bm25 else []
+        keyword = sorted((i for i in range(len(self.metadata))
+                          if ok({"metadata": self.metadata[i]}) and scores[i] > 0),
+                         key=lambda i: -scores[i])
+        fused: Dict[int, float] = {}
+        for rank, r in enumerate(dense):
+            fused[r["index"]] = fused.get(r["index"], 0) + 1 / (60 + rank)
+        for rank, i in enumerate(keyword):
+            fused[i] = fused.get(i, 0) + 1 / (60 + rank)
+        best = sorted(fused, key=lambda i: -fused[i])[:top_k]
+        return [{"index": i, "distance": -fused[i], "metadata": self.metadata[i]} for i in best]
