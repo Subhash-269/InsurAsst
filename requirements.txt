@@ -1,0 +1,25 @@
+# Web app
+Django==5.1.3
+python-dotenv
+
+# RAG: loaders, chunking, embeddings, vector store
+langchain==0.3.27
+langchain-community==0.3.31
+pypdf
+docx2txt                 # .docx loader
+unstructured[xlsx]       # .xlsx loader
+jq                       # .json loader
+faiss-cpu==1.12.0
+rank_bm25==0.2.2          # only for RAG_HYBRID=True
+sentence-transformers==2.2.2
+transformers==4.35.2
+# accelerate>=1.0 needs huggingface_hub>=0.23; sentence-transformers 2.2.2 breaks on >=0.26
+huggingface_hub>=0.23,<0.26
+
+# Local LLM (requires the Ollama app running with `ollama pull qwen2.5:7b`)
+ollama
+
+# Vision: YOLOv11 segmentation on CarDD
+torch>=2.1               # install the CUDA build from pytorch.org for GPU inference
+ultralytics==8.3.37
+opencv-python==4.10.0.84

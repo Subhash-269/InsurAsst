@@ -10,7 +10,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # Step 1: Load all docs from your data folder
         self.stdout.write("[INFO] Loading documents...")
-        docs = load_all_documents("data")
+        docs = load_all_documents(str(settings.MEDIA_ROOT))
         self.stdout.write(f"[INFO] Loaded {len(docs)} documents.")
 
         # Step 2: Initialize FAISS store

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import List, Any
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, CSVLoader
@@ -86,15 +87,27 @@ def load_all_documents(data_dir: str) -> List[Any]:
     for json_file in json_files:
         print(f"[DEBUG] Loading JSON: {json_file}")
         try:
-            loader = JSONLoader(str(json_file))
+            # jq_schema is required; "." indexes the whole file as one document
+            loader = JSONLoader(str(json_file), jq_schema=".", text_content=False)
             loaded = loader.load()
             print(f"[DEBUG] Loaded {len(loaded)} JSON docs from {json_file}")
             documents.extend(loaded)
         except Exception as e:
             print(f"[ERROR] Failed to load JSON {json_file}: {e}")
 
+    for doc in documents:
+        doc.page_content = _clean_text(doc.page_content)
+
     print(f"[DEBUG] Total loaded documents: {len(documents)}")
     return documents
+
+
+# Letter-spaced watermark ("S A M P L E  D O C U M E N T") printed on every page of the sample policies
+_WATERMARK = re.compile(r"S\s?A\s?M\s?P\s?L\s?E\s+D\s?O\s?C\s?U\s?M\s?E\s?N\s?T")
+
+def _clean_text(text: str) -> str:
+    """Strip page watermarks so they don't pollute every chunk's embedding."""
+    return _WATERMARK.sub(" ", text or "").strip()
 
 # Example usage
 if __name__ == "__main__":
