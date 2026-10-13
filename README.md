@@ -1,8 +1,8 @@
 # Auto Insurance Assistant
 
-A local, privacy-friendly assistant for car-insurance claims. Describe what happened (and add a photo of the damage); it works out which coverage in **your own policy** applies, explains the conditions with **cited passages**, lists the steps the policy requires, and asks the follow-up questions that would change the answer.
+An assistant for car-insurance claims. Describe what happened (and add a photo of the damage); it works out which coverage in **your own policy** applies, explains the conditions with **cited passages**, lists the steps the policy requires, and asks the follow-up questions that would change the answer.
 
-By default everything runs on your machine: embeddings, vector search, the LLM (Qwen 2.5 7B via Ollama) and the vision model, so no document or photo leaves the device. Without a GPU, use the Google Gemini API instead.
+It runs fully on your machine with a local model (Qwen 2.5 7B via Ollama), so no document or photo leaves the device, or with the **Google Gemini API**, which needs no GPU. It ships with an evaluation suite, MLflow tracking and tracing, a production Docker image and Kubernetes manifests.
 
 ![Workspace: a hit-and-run question answered from the policy with cited passages, next to damage detection on the photo](docs/screenshots/03-workspace-dark.png)
 
@@ -16,6 +16,8 @@ By default everything runs on your machine: embeddings, vector search, the LLM (
 - **Document management** – upload PDF / TXT / DOCX / CSV / XLSX / JSON files, rebuild or clear the index, delete files.
 - **Quick tools** – out-of-pocket estimator, FAQs, contact form. Claim status is a demo stub.
 - **Light and dark themes**, phone-width layout.
+- **Measured and observable** – a scenario test set with traps (`manage.py evaluate`), every evaluation logged as an MLflow run, and every chat turn traced step by step.
+- **Deployable** – production settings, a read-only public demo mode, a Docker image and Kubernetes manifests with health and readiness probes.
 
 <details>
 <summary>More screenshots</summary>
@@ -41,7 +43,7 @@ Question   1. route     LLM reads the catalogue + the customer's situation → p
                         (+ that Part's Exclusions)
            2. retrieve  routed sections, starting at their heading, + top vector-search hits from the same policy
                         (each hit extended with the next chunk of its section)
-           3. answer    system prompt + last turns + photo facts + numbered passages → Qwen 2.5 7B (Ollama)
+           3. answer    system prompt + last turns + photo facts + numbered passages → LLM (Gemini API or Ollama)
                         → streamed answer: short answer · what your policy says [n] · what to do next · questions
                         citations (file, page range, section) go to the UI in the X-Sources header
 
@@ -54,28 +56,40 @@ Photo      YOLOv11-seg (CarDD, 6 classes) → masks + counts → LLM summary →
 | Retrieval | LangChain loaders, section-aware chunking, `sentence-transformers` (all-MiniLM-L6-v2), FAISS, LLM coverage routing |
 | Generation | Qwen 2.5 7B through [Ollama](https://ollama.com), or the Google Gemini API (OpenAI-compatible endpoint, via the `openai` SDK); a Hugging Face backend is also supported |
 | Vision | Ultralytics YOLOv11 segmentation, OpenCV |
+| Evaluation and observability | Scenario test set + scorer, MLflow 3 (runs and traces, local SQLite) |
+| Deployment | Gunicorn + WhiteNoise, Docker (CPU-only image), Kubernetes with Kustomize |
 
 ### Project layout
 
 ```
-insuranceasst/
-├── backend/
-│   ├── data_loader.py      # load PDF/TXT/CSV/XLSX/DOCX/JSON, strip page watermarks
-│   ├── embedding.py        # section detection + cross-page chunking + embeddings
-│   ├── vectorstore.py      # FAISS index: build, save/load, per-file query (optional BM25 hybrid)
-│   └── search__.py         # RAGSearch: coverage catalogue + routing, retrieval, prompt, Ollama/HF backends
-├── chat/
-│   ├── views.py            # page + JSON/streaming API endpoints
-│   ├── templates/chat/index.html
-│   ├── static/chat/        # script.js, style.css
-│   └── management/commands/
-│       ├── build_index.py  # python manage.py build_index
-│       └── evaluate.py     # python manage.py evaluate (see "Checking answer quality")
-├── eval/scenarios.json     # test conversations with the correct coverage, pages and traps
-├── insuranceasst/settings.py
-├── data/                   # policy documents (served at /media/); claim photos in data/images/claims/
-├── faiss_store/            # generated vector index
-└── models/                 # YOLO weights (yolov11-seg-cardd.pt)
+.
+├── Dockerfile, .dockerignore   # production image (CPU, Gemini API, read-only demo by default)
+├── docker-compose.yml          # run that image locally
+├── k8s/
+│   ├── base/                   # namespace, ConfigMap, Deployment (probes, limits, non-root), Service
+│   └── overlays/local/         # Docker Desktop: local image, localhost:8080, Secret from secrets.env
+├── requirements.txt
+├── .env.example                # Gemini key, Django secret, MLflow options -> copy to .env
+└── insuranceasst/              # Django project (run manage.py from here)
+    ├── backend/
+    │   ├── data_loader.py      # load PDF/TXT/CSV/XLSX/DOCX/JSON, strip page watermarks
+    │   ├── embedding.py        # section detection + cross-page chunking + embeddings
+    │   ├── vectorstore.py      # FAISS index: build, save/load, per-file query (optional BM25 hybrid)
+    │   ├── search__.py         # RAGSearch: coverage catalogue + routing, retrieval, prompt, Gemini/Ollama/HF backends
+    │   └── tracing.py          # MLflow tracing helpers (no-op when MLflow is off or missing)
+    ├── chat/
+    │   ├── views.py            # page + JSON/streaming API, /health/, /ready/, demo-mode guard
+    │   ├── templates/chat/index.html
+    │   ├── static/chat/        # script.js, style.css
+    │   └── management/commands/
+    │       ├── build_index.py  # python manage.py build_index
+    │       └── evaluate.py     # python manage.py evaluate (see "Checking answer quality")
+    ├── eval/scenarios.json     # test conversations with the correct coverage, pages and traps
+    ├── insuranceasst/          # settings.py (environment-driven), urls.py, wsgi.py
+    ├── gunicorn.conf.py        # production server settings
+    ├── data/                   # policy documents (served at /media/); claim photos in data/images/claims/
+    ├── faiss_store/            # generated vector index
+    └── models/                 # YOLO weights (yolov11-seg-cardd.pt)
 ```
 
 ## Getting started
@@ -87,6 +101,7 @@ insuranceasst/
   - **local:** [Ollama](https://ollama.com/download) with `ollama pull qwen2.5:7b` (~4.7 GB; an NVIDIA GPU with ~6 GB free VRAM is recommended), or
   - **no GPU:** a Google Gemini API key. See [Choosing the language model](#choosing-the-language-model).
 - Everything else runs on CPU: the embedding model is small, and YOLO falls back to CPU automatically (about a second per photo). Install the CUDA build of PyTorch only if you want GPU vision inference.
+- Optional: Docker Desktop, for the container and Kubernetes setup in [Deployment](#deployment-docker-and-kubernetes).
 
 ### Install
 
@@ -116,7 +131,9 @@ python manage.py runserver
 
 Open <http://127.0.0.1:8000>, pick a policy in the top bar, then ask a question or upload a car photo in the **Damage analysis** panel.
 
-The first question after startup takes up to a minute while the embedding model and the LLM load; after that, answers start streaming within a few seconds on a GPU.
+Run these with the venv active. `runserver` is for local development: `DEBUG` is on and every feature, including upload and delete, is available. For the production setup, see [Deployment](#deployment-docker-and-kubernetes).
+
+The first question after startup waits while the embedding model and YOLO load (about 30 seconds on CPU). After that, answers start within a few seconds with Gemini; a local 7B model on a GPU takes longer for the first answer, which loads the model.
 
 ## Choosing the language model
 
@@ -171,6 +188,21 @@ Set in `insuranceasst/insuranceasst/settings.py`. The `LLM_*` values come from e
 
 The `OLLAMA_HOST` environment variable points the app at a non-default Ollama server. Rebuild the index (`build_index` or **Documents → Rebuild index**) after changing documents or upgrading, so chunks carry section and page-range data.
 
+Deployment and observability settings, all environment variables. None are needed for local `runserver`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DJANGO_DEBUG` | `1` | `0` in production (the Docker image sets it) |
+| `DJANGO_SECRET_KEY` | dev-only key | **Required** when `DJANGO_DEBUG=0`; the app refuses to start without it |
+| `DJANGO_ALLOWED_HOSTS` | – | Comma-separated hostnames, e.g. `localhost,insurance.example.com` |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | – | e.g. `https://insurance.example.com` |
+| `DJANGO_BEHIND_TLS_PROXY` | `0` | `1` behind an HTTPS ingress: secure cookies, HTTPS redirect, HSTS (`DJANGO_HSTS_SECONDS`) |
+| `DEMO_READONLY` | `0` (`1` in the image) | Turns off upload, delete, rebuild index and clear index (API returns 403; UI hides them) |
+| `DJANGO_STATIC_ROOT` | `insuranceasst/staticfiles` | Where `collectstatic` writes |
+| `GUNICORN_THREADS` / `GUNICORN_TIMEOUT` | `8` / `300` | Production server tuning (`gunicorn.conf.py`) |
+| `MLFLOW_TRACING` | `1` (`0` in the image) | Per-request tracing on or off |
+| `MLFLOW_TRACKING_URI` | `sqlite:///mlflow.db` (repo root) | Where runs and traces go |
+
 ## API
 
 | Method | Endpoint | Body | Returns |
@@ -183,8 +215,10 @@ The `OLLAMA_HOST` environment variable points the app at a non-default Ollama se
 | `POST` | `/api/files/delete/` | `{"names": [...]}` | `{"deleted", "missing"}` |
 | `POST` | `/api/reindex/` | – | Rebuilds the FAISS index from `data/` |
 | `POST` | `/api/vectors/clear/` | – | Deletes the FAISS index |
-| `GET` | `/health/` | – | `{"ok": true}` |
+| `GET` | `/health/` | – | `{"ok": true}` (liveness) |
+| `GET` | `/ready/` | – | `{"ready": true}` once models are loaded, `503` before (readiness) |
 
+- With `DEMO_READONLY=1`, upload, delete, reindex and clear return `403` with `{"ok": false, "error": "This demo is read-only…"}`.
 - `doc` is a file name such as `Allstate.pdf`; retrieval is limited to that file.
 - `history` is the last few turns as `[{"role": "user"|"assistant", "content": "..."}]` (the server keeps the last 6).
 - `facts` is free text the assistant should treat as known, e.g. the photo-analysis findings.
@@ -244,22 +278,34 @@ docker compose up --build        # http://localhost:8000
 1. Docker Desktop → **Settings → Kubernetes → Enable Kubernetes**, then `kubectl config use-context docker-desktop`.
 2. Build the image (the cluster uses it straight from Docker; no registry): `docker build -t insurance-assistant:latest .`
 3. Create the secret file: `cp k8s/overlays/local/secrets.env.example k8s/overlays/local/secrets.env` and fill in `DJANGO_SECRET_KEY` and `LLM_API_KEY` (git-ignored).
-4. Deploy and watch it become ready (the first start loads the models, ~1 minute):
+4. Deploy and watch it become ready (the pod loads the models first, about 30 seconds):
    ```bash
    kubectl apply -k k8s/overlays/local
    kubectl -n insurance-assistant rollout status deployment/insurance-assistant
    ```
 5. Open <http://localhost:8080>.
 
-Useful commands: `kubectl -n insurance-assistant get pods`, `kubectl -n insurance-assistant logs deploy/insurance-assistant -f`, `kubectl delete -k k8s/overlays/local`.
+Useful commands:
+
+```bash
+kubectl -n insurance-assistant get pods                          # status, restarts
+kubectl -n insurance-assistant logs deploy/insurance-assistant -f # Gunicorn + app logs
+# after code changes: rebuild the image, then replace the pod
+docker build -t insurance-assistant:latest . && kubectl -n insurance-assistant rollout restart deployment/insurance-assistant
+kubectl delete -k k8s/overlays/local                             # remove everything
+```
+
+On Windows Git Bash, prefix `docker run` commands that use container paths (e.g. `--tmpfs /tmp`) with `MSYS_NO_PATHCONV=1`; otherwise Git Bash rewrites them into Windows paths.
 
 How the manifests are organised (Kustomize, built into `kubectl`): `k8s/base` holds what every environment shares (namespace, ConfigMap with non-secret settings, Deployment, Service). `k8s/overlays/local` adds the Secret (from the git-ignored `secrets.env`), uses the local image (`imagePullPolicy: Never`) and exposes it on `localhost:8080`. The Deployment runs as a non-root user with a read-only root filesystem; only `/tmp` and the claim-photo folder are writable (`emptyDir`, so photos disappear on restart). Its probes send `Host: localhost` because the kubelet calls the pod by IP, which `ALLOWED_HOSTS` would reject. It runs a single replica because claim photos live inside the pod.
 
 ## Limitations
 
-- **Not legal or insurance advice.** Answers come from a 7B local model. It can pick the wrong coverage (for example Collision instead of Comprehensive for a cracked windshield), miss an exception that is in a cited passage, overstate certainty ("you are covered" rather than "you are covered if you bought collision"), or answer questions the policy doesn't address. Check the cited passages before relying on an answer.
+- **Not legal or insurance advice.** Answers come from small models (a local 7B model or Gemini Flash-Lite). They can pick the wrong coverage (for example suggesting Limited Collision for a hit-and-run, which that coverage excludes), miss an exception that is in a cited passage, overstate certainty ("you are covered" rather than "you are covered if you bought collision"), or answer questions the policy doesn't address. Check the cited passages before relying on an answer.
 - **Follow-up questions are uneven** – often useful ("Which coverages are on your Declarations page?"), sometimes off-target.
 - **Coverage routing relies on section headings.** It is built for policies organised in Parts and Coverages with a table of contents (as in the two sample policies); other documents fall back to plain vector search.
-- **Development setup only.** `DEBUG=True`, a committed `SECRET_KEY`, no authentication, and CSRF-exempt write endpoints. Do not expose it to a network as is.
+- **No user accounts.** Write endpoints have no login or CSRF protection, so anything reachable from a network should run with `DEMO_READONLY=1` (the image's default).
+- **Single replica.** Uploaded and annotated photos live inside the pod (`emptyDir`): they vanish on restart, a restart briefly takes the site down, and a second replica couldn't serve the first one's photos. Scaling out needs shared storage.
+- **Large image** (about 4.6 GB, mostly PyTorch and document-loader dependencies the demo doesn't use).
 - The vision model detects damage *types*, not severity or repair cost, and only the six CarDD classes.
 - Claim status is a placeholder response.
