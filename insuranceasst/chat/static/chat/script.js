@@ -422,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
       row.dataset.name = f.name;
       const icon = f.ext === '.pdf' ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text';
       row.innerHTML = `
-        <input class="form-check-input file-chk" type="checkbox" aria-label="Select ${escapeHtml(f.name)}">
+        <input class="form-check-input file-chk write-only" type="checkbox" aria-label="Select ${escapeHtml(f.name)}">
         <i class="bi ${icon}"></i>
         <span class="name">${escapeHtml(f.name)}</span>
         <span class="muted small">${(f.size / 1024).toFixed(0)} KB</span>

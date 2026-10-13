@@ -21,3 +21,6 @@ eval-runs/
 # MLflow local tracking data (runs, traces, artifacts)
 mlruns/
 mlflow.db
+
+# Kubernetes secrets (templates: secrets.env.example)
+k8s/**/secrets.env

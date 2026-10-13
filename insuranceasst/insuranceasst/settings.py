@@ -18,16 +18,36 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR.parent / ".env")  # repo-root .env (git-ignored); real environment variables win
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
+def _env_bool(name: str, default: bool) -> bool:
+    return os.getenv(name, "1" if default else "0").strip().lower() in ("1", "true", "yes", "on")
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-jys9_b1e7c%)@q-it+9=8_tdr-f9!40i1!gjqwoxs%toy$2ic&'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+def _env_list(name: str) -> list:
+    return [x.strip() for x in os.getenv(name, "").split(",") if x.strip()]
 
-ALLOWED_HOSTS = []
+
+# Deployment settings come from the environment (see docs: deployment checklist).
+# Local development needs none of them: DEBUG defaults to on and a throwaway key is used.
+DEBUG = _env_bool("DJANGO_DEBUG", True)
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("Set DJANGO_SECRET_KEY when DJANGO_DEBUG=0")
+    SECRET_KEY = "django-insecure-dev-only-key-not-for-production"
+
+ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS")          # e.g. "insurance.example.com,localhost"
+CSRF_TRUSTED_ORIGINS = _env_list("DJANGO_CSRF_TRUSTED_ORIGINS")  # e.g. "https://insurance.example.com"
+if _env_bool("DJANGO_BEHIND_TLS_PROXY", False):
+    # ingress terminates HTTPS and forwards plain HTTP with X-Forwarded-Proto
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_REDIRECT_EXEMPT = [r"^health/$", r"^ready/$"]  # probes hit the pod over plain HTTP
+    SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_HSTS_SECONDS", "3600"))  # raise once HTTPS is known to work
+
+# Public demo: turn off upload, delete, rebuild-index and clear-index (API and UI). Chat and photos still work.
+DEMO_READONLY = _env_bool("DEMO_READONLY", False)
 
 # RAG defaults
 FAISS_DIR = BASE_DIR / "faiss_store"
@@ -71,6 +91,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # serves /static/ in production without nginx
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -150,7 +171,21 @@ STATICFILES_DIRS = [
     BASE_DIR / 'static',
 ]
 
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_ROOT = Path(os.getenv("DJANGO_STATIC_ROOT", BASE_DIR / 'staticfiles'))
+if not DEBUG:
+    # hashed, compressed copies made by `collectstatic` (done in the Docker build)
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    }
+
+# Logs to stdout/stderr, where containers and Kubernetes collect them
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": os.getenv("DJANGO_LOG_LEVEL", "INFO")},
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

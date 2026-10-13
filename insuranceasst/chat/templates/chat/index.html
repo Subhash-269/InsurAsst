@@ -23,7 +23,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'chat/style.css' %}">
 </head>
-<body>
+<body data-demo="{{ demo_readonly|yesno:'1,0' }}">
   <!-- ===== Top bar ===== -->
   <header class="topbar">
     <div class="brand">
@@ -132,14 +132,16 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <form id="upload-form" class="upload-row">
+          <div class="demo-only demo-note"><i class="bi bi-lock"></i> Read-only demo: the sample policies can be opened
+            and chatted with, but not uploaded, deleted or re-indexed.</div>
+          <form id="upload-form" class="upload-row write-only">
             <input type="file" class="form-control" id="file" name="file" accept=".pdf,.txt,.docx,.csv,.xlsx,.json">
             <button class="btn btn-primary" type="submit"><i class="bi bi-upload"></i> Upload</button>
           </form>
-          <div class="form-text mb-3">PDF, TXT, DOCX, CSV, XLSX or JSON. Rebuild the index after uploading.</div>
+          <div class="form-text mb-3 write-only">PDF, TXT, DOCX, CSV, XLSX or JSON. Rebuild the index after uploading.</div>
 
           <div class="d-flex align-items-center justify-content-between mb-2">
-            <div class="form-check">
+            <div class="form-check write-only">
               <input class="form-check-input" type="checkbox" id="chk-all">
               <label class="form-check-label small" for="chk-all">Select all</label>
             </div>
@@ -147,7 +149,7 @@
           </div>
           <div id="files" class="file-list"></div>
         </div>
-        <div class="modal-footer justify-content-between">
+        <div class="modal-footer justify-content-between write-only">
           <div class="d-flex gap-2">
             <button id="btn-reindex" class="btn btn-outline-primary btn-sm"><i class="bi bi-arrow-repeat"></i> Rebuild index</button>
             <button id="btn-clear-vdb" class="btn btn-outline-warning btn-sm"><i class="bi bi-eraser"></i> Clear index</button>

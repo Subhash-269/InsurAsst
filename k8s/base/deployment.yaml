@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insurance-assistant
+  labels:
+    app: insurance-assistant
+spec:
+  # One replica: annotated claim photos are stored in the pod, so a second pod couldn't serve them.
+  # Move them to shared storage before scaling out.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: insurance-assistant
+  template:
+    metadata:
+      labels:
+        app: insurance-assistant
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: insurance-assistant:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: insurance-assistant-config
+            - secretRef:
+                name: insurance-assistant-secrets   # LLM_API_KEY, DJANGO_SECRET_KEY
+          resources:
+            # embedding model + FAISS + YOLO + PyTorch: ~1.35 GiB measured after a chat turn and a photo analysis
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          # The kubelet probes the pod IP; send a Host Django's ALLOWED_HOSTS accepts.
+          startupProbe:          # up to 5 min for the first model load; other probes wait for it
+            httpGet:
+              path: /ready/
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:        # only send traffic once models are loaded
+            httpGet:
+              path: /ready/
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:         # restart if the process stops answering at all
+            httpGet:
+              path: /health/
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:          # the only writable paths
+            - name: tmp
+              mountPath: /tmp
+            - name: claims
+              mountPath: /app/insuranceasst/data/images/claims
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: claims           # uploaded + annotated photos; cleared when the pod restarts
+          emptyDir:
+            sizeLimit: 1Gi

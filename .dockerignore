@@ -1,0 +1,29 @@
+# Keep the build context small and free of secrets / personal data
+.git
+.gitignore
+.venv
+**/__pycache__
+**/*.pyc
+.env
+.env.*
+!.env.example
+
+# local tracking data, evaluation runs, docs
+mlflow.db
+mlruns
+eval-runs
+docs
+README.md
+k8s
+
+# regenerated inside the image
+insuranceasst/faiss_store
+insuranceasst/staticfiles
+insuranceasst/db.sqlite3
+
+# user uploads / test photos - only the sample policy PDFs ship in the image
+insuranceasst/data/images
+insuranceasst/media
+insuranceasst/testimages
+insuranceasst/.playwright-mcp
+.playwright-mcp
