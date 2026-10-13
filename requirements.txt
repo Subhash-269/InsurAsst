@@ -1,6 +1,8 @@
 # Web app
 Django==5.1.3
 python-dotenv
+whitenoise==6.9.0          # static files in production
+gunicorn==23.0.0           # production server (Linux/containers)
 
 # RAG: loaders, chunking, embeddings, vector store
 langchain==0.3.27

@@ -290,3 +290,10 @@ button.chip:hover { color: var(--text); border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ===== Read-only demo (DEMO_READONLY=1) ===== */
+.demo-only { display: none; }
+[data-demo="1"] .demo-only { display: block; }
+[data-demo="1"] .write-only { display: none !important; }
+.demo-note { margin-bottom: 1rem; padding: .6rem .8rem; border-radius: 10px; font-size: .88rem;
+  background: var(--accent-soft); color: var(--text); }

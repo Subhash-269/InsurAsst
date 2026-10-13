@@ -223,6 +223,38 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
 - Turn tracing off with `MLFLOW_TRACING=0`, skip run logging with `evaluate --no-mlflow`, or point everything at an MLflow server with `MLFLOW_TRACKING_URI`.
 - The app runs without MLflow installed; tracing then becomes a no-op.
 
+## Deployment (Docker and Kubernetes)
+
+The production image runs Gunicorn with `DEBUG` off, serves static files with WhiteNoise, and defaults to a **read-only public demo** (`DEMO_READONLY=1`): chat and photo analysis work, but uploading, deleting and re-indexing are disabled in both the API (HTTP 403) and the UI. The language model is the Gemini API, so no GPU is needed. The YOLO weights, the sample policies, the embedding model and the search index are baked into the image at build time.
+
+| Endpoint | Purpose |
+|---|---|
+| `/health/` | Liveness: the process is up |
+| `/ready/` | Readiness: `503` until the models are loaded (loading starts on the first call), then `200` |
+
+### Docker
+
+```bash
+# repo-root .env needs LLM_API_KEY (Gemini) and DJANGO_SECRET_KEY, see .env.example
+docker compose up --build        # http://localhost:8000
+```
+
+### Kubernetes (Docker Desktop)
+
+1. Docker Desktop → **Settings → Kubernetes → Enable Kubernetes**, then `kubectl config use-context docker-desktop`.
+2. Build the image (the cluster uses it straight from Docker; no registry): `docker build -t insurance-assistant:latest .`
+3. Create the secret file: `cp k8s/overlays/local/secrets.env.example k8s/overlays/local/secrets.env` and fill in `DJANGO_SECRET_KEY` and `LLM_API_KEY` (git-ignored).
+4. Deploy and watch it become ready (the first start loads the models, ~1 minute):
+   ```bash
+   kubectl apply -k k8s/overlays/local
+   kubectl -n insurance-assistant rollout status deployment/insurance-assistant
+   ```
+5. Open <http://localhost:8080>.
+
+Useful commands: `kubectl -n insurance-assistant get pods`, `kubectl -n insurance-assistant logs deploy/insurance-assistant -f`, `kubectl delete -k k8s/overlays/local`.
+
+How the manifests are organised (Kustomize, built into `kubectl`): `k8s/base` holds what every environment shares (namespace, ConfigMap with non-secret settings, Deployment, Service). `k8s/overlays/local` adds the Secret (from the git-ignored `secrets.env`), uses the local image (`imagePullPolicy: Never`) and exposes it on `localhost:8080`. The Deployment runs as a non-root user with a read-only root filesystem; only `/tmp` and the claim-photo folder are writable (`emptyDir`, so photos disappear on restart). Its probes send `Host: localhost` because the kubelet calls the pod by IP, which `ALLOWED_HOSTS` would reject. It runs a single replica because claim photos live inside the pod.
+
 ## Limitations
 
 - **Not legal or insurance advice.** Answers come from a 7B local model. It can pick the wrong coverage (for example Collision instead of Comprehensive for a cracked windshield), miss an exception that is in a cited passage, overstate certainty ("you are covered" rather than "you are covered if you bought collision"), or answer questions the policy doesn't address. Check the cited passages before relying on an answer.

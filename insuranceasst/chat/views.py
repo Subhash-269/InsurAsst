@@ -1,4 +1,4 @@
-import json, os, re
+import functools, json, os, re, threading
 from pathlib import Path
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render
@@ -18,9 +18,16 @@ import shutil
 
 # ---------- RAG singleton ----------
 _rag = None
+_rag_lock = threading.Lock()  # gunicorn threads: load the models once even if the first requests overlap
+_warmup = {"started": False, "error": None}
+
 def _get_rag():
     global _rag
-    if _rag is None:
+    if _rag is not None:
+        return _rag
+    with _rag_lock:
+        if _rag is not None:
+            return _rag
         if tracing.enabled():
             tracing.configure(settings.MLFLOW_TRACKING_URI, settings.MLFLOW_CHAT_EXPERIMENT,
                               settings.MLFLOW_ARTIFACT_ROOT)
@@ -40,7 +47,38 @@ def _get_rag():
 
 # ---------- Pages ----------
 def health(request):
+    """Liveness: the process is up (cheap, never loads models)."""
     return JsonResponse({"ok": True})
+
+
+def _warm_up():
+    try:
+        _get_rag()
+        _get_yolo()
+    except Exception as e:  # reported by /ready/ so the pod stays unready instead of crashing
+        _warmup["error"] = str(e)
+
+
+def ready(request):
+    """Readiness: 200 once the embedding/index/LLM client and YOLO are loaded. The first probe starts
+    loading them in the background, so the pod gets no traffic until it can actually answer."""
+    if _rag is not None and _yolo is not None:
+        return JsonResponse({"ready": True})
+    if not _warmup["started"]:
+        _warmup["started"] = True
+        threading.Thread(target=_warm_up, name="warmup", daemon=True).start()
+    return JsonResponse({"ready": False, "error": _warmup["error"]}, status=503)
+
+
+def _writable(view):
+    """In DEMO_READONLY mode, refuse requests that change documents or the index."""
+    @functools.wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if getattr(settings, "DEMO_READONLY", False):
+            return JsonResponse({"ok": False, "error": "This demo is read-only: uploading, deleting and "
+                                 "re-indexing are turned off."}, status=403)
+        return view(request, *args, **kwargs)
+    return wrapper
 
 def _list_indexed_docs():
     # Return just the file basenames to match the filter
@@ -56,7 +94,8 @@ def _list_indexed_docs():
 
 def index(request):
     # Pass document options to the template
-    return render(request, "chat/index.html", {"docs": _list_indexed_docs()})
+    return render(request, "chat/index.html", {"docs": _list_indexed_docs(),
+                                               "demo_readonly": getattr(settings, "DEMO_READONLY", False)})
 
 # ---------- Chat API ----------
 @csrf_exempt
@@ -118,6 +157,7 @@ def list_files(request):
     return JsonResponse({"files": items})
 
 @csrf_exempt
+@_writable
 def upload_file(request):
     """POST a file; save to ./data; optionally reindex via separate call."""
     if request.method != "POST":
@@ -134,6 +174,7 @@ def upload_file(request):
     return JsonResponse({"ok": True, "saved_as": filename, "url": _public_url(filename)})
 
 @csrf_exempt
+@_writable
 def reindex(request):
     """POST: rebuild FAISS index from current ./data. (Blocking)"""
     if request.method != "POST":
@@ -355,6 +396,7 @@ def vision_analyze(request):
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
     
 @csrf_exempt
+@_writable
 def delete_files(request):
     """
     POST JSON: { "names": ["file1.pdf", "file2.docx", ...] }
@@ -394,6 +436,7 @@ def delete_files(request):
 
 # --- clear vector DB (FAISS dir) ---
 @csrf_exempt
+@_writable
 def clear_vectors(request):
     """
     POST: wipe the FAISS_DIR (recreate empty). Adjust if you use a hosted DB.

@@ -1,0 +1,18 @@
+# Run the production image locally:  docker compose up --build   ->  http://localhost:8000
+# Needs LLM_API_KEY (Gemini) and DJANGO_SECRET_KEY in the repo-root .env (see .env.example).
+services:
+  web:
+    build: .
+    image: insurance-assistant:latest
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
+      DEMO_READONLY: "1"
+      MLFLOW_TRACING: "0"
+      # .env may point the app at a local Ollama; inside the container use the Gemini API
+      LLM_BACKEND: "openai"
+      LLM_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    restart: unless-stopped
