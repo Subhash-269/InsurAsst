@@ -18,6 +18,10 @@ huggingface_hub>=0.23,<0.26
 
 # Local LLM (requires the Ollama app running with `ollama pull qwen2.5:7b`)
 ollama
+openai>=1.40              # Gemini API via its OpenAI-compatible endpoint
+
+# Experiment tracking + tracing (python manage.py evaluate, request traces); UI: mlflow ui
+mlflow>=3,<4
 
 # Vision: YOLOv11 segmentation on CarDD
 torch>=2.1               # install the CUDA build from pytorch.org for GPU inference

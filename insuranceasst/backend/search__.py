@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from backend.vectorstore import FaissVectorStore           # ✅ single, correct import
 from backend.data_loader import load_all_documents         # ✅ single, correct import
+from backend.tracing import trace                          # MLflow spans (no-op if disabled)
 
 load_dotenv()
 
@@ -46,10 +47,12 @@ class OllamaLLM(LocalLLM):
             options["num_predict"] = max_new_tokens
         return options
 
+    @trace("ollama.chat", "CHAT_MODEL")
     def chat(self, messages: Messages, max_new_tokens: int = 256) -> str:
         resp = self.client.chat(model=self.model, messages=messages, options=self._options(max_new_tokens))
         return resp["message"]["content"].strip()
 
+    @trace("ollama.stream_chat", "CHAT_MODEL")
     def stream_chat(self, messages: Messages, max_new_tokens: Optional[int] = None):
         """Yield the answer in chunks as Ollama produces them."""
         for part in self.client.chat(
@@ -61,6 +64,38 @@ class OllamaLLM(LocalLLM):
             chunk = (part.get("message") or {}).get("content") or ""
             if chunk:
                 yield chunk
+
+
+class OpenAICompatLLM(LocalLLM):
+    """An OpenAI-compatible chat API - used for Google Gemini (its /v1beta/openai/ endpoint). No local GPU needed."""
+    seed = None  # kept for interface parity; hosted models aren't reproducible from a seed anyway
+
+    def __init__(self, model: str = "auto", base_url: Optional[str] = None, api_key: Optional[str] = None,
+                 timeout: float = 120.0):
+        from openai import OpenAI
+        if not base_url:
+            raise ValueError("LLM_BASE_URL is required for the OpenAI-compatible backend")
+        self.model = model
+        self.base_url = base_url
+        # the SDK requires a non-empty key even for endpoints that don't check one
+        self.client = OpenAI(base_url=base_url, api_key=api_key or "not-needed", timeout=timeout, max_retries=2)
+
+    @trace("openai_compat.chat", "CHAT_MODEL")
+    def chat(self, messages: Messages, max_new_tokens: int = 256) -> str:
+        resp = self.client.chat.completions.create(
+            model=self.model, messages=messages, temperature=0.2, top_p=0.95, max_tokens=max_new_tokens,
+        )
+        return (resp.choices[0].message.content or "").strip() if resp.choices else ""
+
+    @trace("openai_compat.stream_chat", "CHAT_MODEL")
+    def stream_chat(self, messages: Messages, max_new_tokens: Optional[int] = None):
+        stream = self.client.chat.completions.create(
+            model=self.model, messages=messages, temperature=0.2, top_p=0.95,
+            max_tokens=max_new_tokens or 1024, stream=True,
+        )
+        for part in stream:
+            if part.choices and part.choices[0].delta and part.choices[0].delta.content:
+                yield part.choices[0].delta.content
 
 
 class HFTransformersLLM(LocalLLM):
@@ -88,6 +123,7 @@ class HFTransformersLLM(LocalLLM):
         if device is not None:
             self.model.to(device)
 
+    @trace("hf.chat", "CHAT_MODEL")
     def chat(self, messages: Messages, max_new_tokens: int = 256) -> str:
         if getattr(self.tokenizer, "chat_template", None):
             prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -117,17 +153,21 @@ class RAGSearch:
         self,
         persist_dir: str = "faiss_store",
         embedding_model: str = "all-MiniLM-L6-v2",
-        backend: str = "ollama",                # "ollama" or "hf"
-        model_name: str = "phi3",               # Ollama model name OR HF model_id
+        backend: str = "ollama",                # "ollama", "openai" (any OpenAI-compatible API) or "hf"
+        model_name: str = "phi3",               # Ollama model name, Gemini model OR HF model_id
         hf_4bit: bool = True,
         data_dir: str = "data",
         hybrid: bool = False,
         expand_query: bool = False,
         neighbors: bool = False,
         route: bool = False,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
     ):
         """
         backend="ollama" -> model_name like: "phi3", "mistral", "llama3", "gemma", "tinyllama"
+        backend="openai" -> base_url of an OpenAI-compatible API (Gemini) + api_key; model_name e.g.
+                            "gemini-3.5-flash-lite"
         backend="hf"     -> model_name is a HF repo id, e.g. "microsoft/phi-3-mini-4k-instruct"
         hybrid           -> fuse keyword (BM25) and vector search
         expand_query     -> ask the LLM to translate the customer's story into policy terms before searching
@@ -146,11 +186,14 @@ class RAGSearch:
         if backend.lower() == "ollama":
             self.llm: LocalLLM = OllamaLLM(model=model_name)
             print(f"[INFO] Using Ollama model: {model_name}")
+        elif backend.lower() == "openai":
+            self.llm = OpenAICompatLLM(model=model_name, base_url=base_url, api_key=api_key)
+            print(f"[INFO] Using OpenAI-compatible API at {base_url}, model: {model_name}")
         elif backend.lower() == "hf":
             self.llm = HFTransformersLLM(model_id=model_name, load_4bit=hf_4bit)
             print(f"[INFO] Using HF Transformers model: {model_name}")
         else:
-            raise ValueError("backend must be 'ollama' or 'hf'")
+            raise ValueError("backend must be 'ollama', 'openai' or 'hf'")
 
     def reload_index(self):
         """Load the FAISS index from disk, building it from data_dir if it is missing or empty."""
@@ -167,6 +210,7 @@ class RAGSearch:
         if docs:
             self.vectorstore.build_from_documents(docs)
 
+    @trace("retrieve", "RETRIEVER")
     def retrieve(self, query: str, top_k: int = 5, doc: Optional[str] = None) -> List[Dict[str, Any]]:
         """Top_k de-duplicated chunks (optionally limited to one source file) as {text, source, page}."""
         if self.vectorstore.index is None:
@@ -283,6 +327,7 @@ class RAGSearch:
         "Reply with 1 to 3 numbers, most relevant first, comma-separated, and nothing else."
     )
 
+    @trace("route_sections", "CHAIN")
     def route_sections(self, query: str, doc: Optional[str]) -> List[Dict[str, Any]]:
         entries = self.catalog(doc)
         if not entries:
@@ -429,6 +474,7 @@ class RAGSearch:
         })
         return msgs
 
+    @trace("prepare", "CHAIN")
     def prepare(
         self,
         question: str,
@@ -472,6 +518,7 @@ class RAGSearch:
         "notify police, proof of loss. No explanation."
     )
 
+    @trace("policy_terms", "LLM")
     def policy_terms(self, query: str) -> str:
         """One short LLM call that maps everyday wording ('drove off', 'transmission died') to policy terms."""
         try:
