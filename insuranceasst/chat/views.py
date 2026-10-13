@@ -1,4 +1,4 @@
-import json, os
+import json, os, re
 from pathlib import Path
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render
@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 
 from backend.search__ import RAGSearch
+from backend import tracing
 from django.http import StreamingHttpResponse
 import uuid, cv2, numpy as np
 import torch
@@ -20,6 +21,9 @@ _rag = None
 def _get_rag():
     global _rag
     if _rag is None:
+        if tracing.enabled():
+            tracing.configure(settings.MLFLOW_TRACKING_URI, settings.MLFLOW_CHAT_EXPERIMENT,
+                              settings.MLFLOW_ARTIFACT_ROOT)
         _rag = RAGSearch(
             persist_dir=getattr(settings, "FAISS_DIR", "faiss_store"),
             backend=getattr(settings, "LLM_BACKEND", "ollama"),
@@ -29,6 +33,8 @@ def _get_rag():
             expand_query=getattr(settings, "RAG_EXPAND_QUERY", False),
             neighbors=getattr(settings, "RAG_NEIGHBORS", False),
             route=getattr(settings, "RAG_ROUTE", False),
+            base_url=getattr(settings, "LLM_BASE_URL", "") or None,
+            api_key=getattr(settings, "LLM_API_KEY", "") or None,
         )
     return _rag
 
@@ -178,29 +184,62 @@ def chat_stream(request):
         history = _clean_history(payload.get("history"))
         facts = str(payload.get("facts") or "")[:1000] or None
 
-        hits, messages = rag.prepare(msg, doc=doc, history=history, facts=facts)
+        # one MLflow trace per turn: routing -> retrieval -> LLM answer (no-op when tracing is off)
+        turn = tracing.TurnTrace("chat_turn", {"question": msg, "doc": doc, "history_turns": len(history) // 2,
+                                               "facts": facts, "model": getattr(rag.llm, "model", None)})
+        try:
+            hits, messages = rag.prepare(msg, doc=doc, history=history, facts=facts)
+        except Exception as e:
+            turn.finish(error=e)
+            raise
+        sources = rag.sources_from(hits)
         context = rag.context_from(hits)
         print("###Context",context)
         if not context:
-            # simple immediate response
-            return StreamingHttpResponse(
-                iter(["No matches found in the selected policy. Try Rebuild Index or choose another document."]),
-                content_type="text/plain",
-            )
+            no_match = "No matches found in the selected policy. Try Rebuild Index or choose another document."
+            turn.finish(outputs={"answer": no_match, "sources": []})
+            return StreamingHttpResponse(iter([no_match]), content_type="text/plain")
 
-        def gen():
-            # Ollama streams for real; the HF backend generates fully, then drips words out
-            try:
-                yield from rag.llm.stream_chat(messages)
-            except Exception as e:
-                # headers are already sent, so report the failure in-band
-                yield f"\n[Error: {e}]"
-        resp = StreamingHttpResponse(gen(), content_type="text/plain")
+        resp = StreamingHttpResponse(_AnswerStream(rag, messages, turn, sources), content_type="text/plain")
         # citations travel in a header so the body can stream immediately (json.dumps keeps it ASCII)
-        resp["X-Sources"] = json.dumps(rag.sources_from(hits))
+        resp["X-Sources"] = json.dumps(sources)
         return resp
     except Exception as e:
         return StreamingHttpResponse(iter([f"Error: {e}"]), content_type="text/plain", status=500)
+
+
+class _AnswerStream:
+    """Streams the LLM answer and closes the turn's trace when the stream ends. Django calls close()
+    even if the client disconnects before reading, which a bare generator's finally would miss."""
+
+    def __init__(self, rag, messages, turn, sources):
+        self.rag, self.messages, self.turn, self.sources = rag, messages, turn, sources
+        self.parts, self.error = [], None
+
+    def __iter__(self):
+        # Ollama streams for real; the HF backend generates fully, then drips words out
+        try:
+            for chunk in self.rag.llm.stream_chat(self.messages):
+                self.parts.append(chunk)
+                yield chunk
+        except Exception as e:
+            self.error = e
+            # headers are already sent, so report the failure in-band
+            where = getattr(self.rag.llm, "base_url", None) or getattr(settings, "LLM_BACKEND", "")
+            yield f"\n[Error: the language model is unavailable ({e}). Check that {where} is running and LLM_* settings are correct.]"
+        finally:
+            self.close()
+
+    def close(self):
+        if self.turn is None:
+            return
+        answer = "".join(self.parts)
+        cited = sorted({int(n) for n in re.findall(r"\[(\d+)\]", answer)})
+        self.turn.finish(outputs={"answer": answer, "cited": cited,
+                                  "sources": [f"{s['name']} p.{s['page']} {s['section'].split(' / ')[-1][:60]}"
+                                              for s in self.sources]},
+                         error=self.error)
+        self.turn = None
 
 # lazy globals
 _yolo = None
@@ -231,6 +270,8 @@ def vision_analyze(request):
         return JsonResponse({"error": "No 'image' file found"}, status=400)
 
     raw_path = ann_path = None
+    # trace: YOLO detection + the LLM summary (its span comes from the LLM's @trace decorator)
+    vt = tracing.TurnTrace("vision_analyze", {"file": request.FILES["image"].name})
     try:
         img_file = request.FILES["image"]
         # save original
@@ -246,8 +287,10 @@ def vision_analyze(request):
         # run YOLO seg (GPU 0 if available, otherwise CPU)
         model = _get_yolo()
         device = 0 if torch.cuda.is_available() else "cpu"
-        results = model.predict(source=str(raw_path), imgsz=640, conf=0.25, device=device)
-        res = results[0]
+        with tracing.span("yolo.predict", "TOOL", device=str(device), imgsz=640, conf=0.25) as ys:
+            results = model.predict(source=str(raw_path), imgsz=640, conf=0.25, device=device)
+            res = results[0]
+            ys.set_outputs({"boxes": len(res.boxes)})
 
         # annotated image (with masks/boxes/labels)
         im_annotated = res.plot()  # numpy BGR
@@ -295,6 +338,7 @@ def vision_analyze(request):
             summary = f"Detected damage: {found}." if found else "No damage detected in this photo."
 
         rel_ann = ann_path.relative_to(_media_root()).as_posix()
+        vt.finish(outputs={"counts": facts["counts"], "summary": summary})
         return JsonResponse({
             "ok": True,
             "annotated_url": _media_url(rel_ann),
@@ -307,6 +351,7 @@ def vision_analyze(request):
         for p in (raw_path, ann_path):
             if p is not None:
                 p.unlink(missing_ok=True)
+        vt.finish(error=e)
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
     
 @csrf_exempt

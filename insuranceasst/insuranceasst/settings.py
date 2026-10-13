@@ -12,8 +12,10 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR.parent / ".env")  # repo-root .env (git-ignored); real environment variables win
 
 
 # Quick-start development settings - unsuitable for production
@@ -29,9 +31,22 @@ ALLOWED_HOSTS = []
 
 # RAG defaults
 FAISS_DIR = BASE_DIR / "faiss_store"
-LLM_BACKEND = "ollama"   # or "hf"
-LLM_MODEL = "qwen2.5:7b"  # Ollama model name; "mistral" also works
-RAG_HYBRID = False        # fuse BM25 keyword search with vector search (evaluated: no gain, off)
+# Language model. Values come from environment variables / the repo-root .env file (see .env.example).
+#   openai: Google Gemini through its OpenAI-compatible API (defaults below) - no local GPU needed
+#   ollama: local model, LLM_MODEL e.g. qwen2.5:7b (needs a GPU for good speed)
+#   hf:     Hugging Face Transformers, LLM_MODEL is a repo id
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+LLM_BACKEND = os.getenv("LLM_BACKEND", "ollama")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.5-flash-lite" if LLM_BACKEND == "openai" else "qwen2.5:7b")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", GEMINI_BASE_URL if LLM_BACKEND == "openai" else "")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")     # Gemini API key (Google AI Studio); never commit it
+# MLflow: experiment tracking for `manage.py evaluate` and per-request traces (view with `mlflow ui`).
+# Local SQLite + artifact folder in the repo root, both git-ignored. MLFLOW_TRACING=0 turns tracing off.
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{(BASE_DIR.parent / 'mlflow.db').as_posix()}")
+MLFLOW_ARTIFACT_ROOT = BASE_DIR.parent / "mlruns"
+MLFLOW_CHAT_EXPERIMENT = os.getenv("MLFLOW_CHAT_EXPERIMENT", "insurance-assistant-chat")
+MLFLOW_EVAL_EXPERIMENT = os.getenv("MLFLOW_EVAL_EXPERIMENT", "insurance-assistant-eval")
+RAG_HYBRID = False       # fuse BM25 keyword search with vector search (evaluated: no gain, off)
 RAG_EXPAND_QUERY = False  # LLM rewrites the customer's story into policy terms (evaluated: no gain, off)
 RAG_NEIGHBORS = True      # extend each retrieved chunk with the next chunk of the same section
 RAG_ROUTE = True          # LLM picks the relevant coverage sections from a catalogue of the policy first

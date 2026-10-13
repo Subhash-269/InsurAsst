@@ -7,16 +7,33 @@ Run the policy Q&A test set (eval/scenarios.json) through the same RAG pipeline 
 
 Writes results.md / results.json to <repo>/eval-runs/<date>_<label>/ (git-ignored).
 """
+import hashlib
 import json
 import re
+import subprocess
 import time
+from contextlib import nullcontext
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
+from backend import tracing
 from backend.search__ import RAGSearch
+
+
+def _git_commit() -> str:
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                              cwd=settings.BASE_DIR, timeout=5).stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 SCENARIOS = Path(settings.BASE_DIR) / "eval" / "scenarios.json"
 RUNS_DIR = Path(settings.BASE_DIR).parent / "eval-runs"
@@ -117,6 +134,7 @@ class Command(BaseCommand):
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--regrade", default=None,
                             help="run folder name under eval-runs/: re-score its saved answers without calling the LLM")
+        parser.add_argument("--no-mlflow", action="store_true", help="don't log this run to MLflow")
 
     def handle(self, *args, **opts):
         data = json.loads(SCENARIOS.read_text(encoding="utf-8"))
@@ -145,27 +163,93 @@ class Command(BaseCommand):
             expand_query=(opts["expand"] == "on") if opts["expand"] else getattr(settings, "RAG_EXPAND_QUERY", False),
             neighbors=(opts["neighbors"] == "on") if opts["neighbors"] else getattr(settings, "RAG_NEIGHBORS", False),
             route=(opts["route"] == "on") if opts["route"] else getattr(settings, "RAG_ROUTE", False),
+            base_url=getattr(settings, "LLM_BASE_URL", "") or None,
+            api_key=getattr(settings, "LLM_API_KEY", "") or None,
         )
         rag.llm.seed = opts["seed"]
         self.stdout.write(f"seed={opts['seed']} hybrid={rag.hybrid} expand_query={rag.expand_query} neighbors={rag.neighbors} route={rag.route} top_k={opts['top_k']}")
 
-        results = []
-        for sc in scenarios:
-            history = []
-            for i, turn in enumerate(sc["turns"], 1):
-                t0 = time.time()
-                hits, messages = rag.prepare(turn["user"], doc=sc["policy"], history=history,
-                                             facts=sc.get("facts"), top_k=opts["top_k"])
-                answer = rag.llm.chat(messages, max_new_tokens=700) if hits else "No relevant passages found."
-                sources = rag.sources_from(hits)
-                g = grade(turn, answer, sources)
-                results.append({"id": sc["id"], "turn": i, "policy": sc["policy"], "model": opts["model"], "user": turn["user"],
-                                "truth": turn.get("truth", ""), "answer": answer, "sources": sources,
-                                "seconds": round(time.time() - t0, 1), **g})
-                self.stdout.write(f"  {sc['id']} turn {i}: {'pass' if g['pass'] else 'fail'} ({time.time() - t0:.0f}s)")
-                history += [{"role": "user", "content": turn["user"]}, {"role": "assistant", "content": answer}]
+        mlflow = tracing.mlflow if (tracing.mlflow is not None and not opts["no_mlflow"]) else None
+        run_ctx = nullcontext()
+        if mlflow is not None:
+            tracing.configure(settings.MLFLOW_TRACKING_URI, settings.MLFLOW_EVAL_EXPERIMENT, settings.MLFLOW_ARTIFACT_ROOT)
+            run_ctx = mlflow.start_run(run_name=label)
 
-        self._write(out_dir, label, opts["model"], results)
+        with run_ctx as run:
+            if mlflow is not None:
+                mlflow.log_params(self._params(rag, opts, scenarios))
+                mlflow.set_tags({"git_commit": _git_commit(), "scenarios_sha": _sha(SCENARIOS)[:12]})
+
+            results = []
+            for sc in scenarios:
+                history = []
+                for i, turn in enumerate(sc["turns"], 1):
+                    t0 = time.time()
+                    # each evaluated turn is its own trace, linked to this run in the MLflow UI
+                    with tracing.span(f"eval_turn {sc['id']} t{i}", "CHAIN") as ts:
+                        ts.set_inputs({"scenario": sc["id"], "turn": i, "question": turn["user"], "policy": sc["policy"]})
+                        hits, messages = rag.prepare(turn["user"], doc=sc["policy"], history=history,
+                                                     facts=sc.get("facts"), top_k=opts["top_k"])
+                        answer = rag.llm.chat(messages, max_new_tokens=700) if hits else "No relevant passages found."
+                        sources = rag.sources_from(hits)
+                        g = grade(turn, answer, sources)
+                        ts.set_outputs({"answer": answer, "pass": g["pass"], "fails": g["fails"]})
+                    results.append({"id": sc["id"], "turn": i, "policy": sc["policy"], "model": opts["model"], "user": turn["user"],
+                                    "truth": turn.get("truth", ""), "answer": answer, "sources": sources,
+                                    "seconds": round(time.time() - t0, 1), **g})
+                    self.stdout.write(f"  {sc['id']} turn {i}: {'pass' if g['pass'] else 'fail'} ({time.time() - t0:.0f}s)")
+                    history += [{"role": "user", "content": turn["user"]}, {"role": "assistant", "content": answer}]
+
+            self._write(out_dir, label, opts["model"], results)
+            if mlflow is not None:
+                self._log_run(mlflow, results, out_dir)
+                self.stdout.write(f"MLflow run {run.info.run_id} in experiment '{settings.MLFLOW_EVAL_EXPERIMENT}' "
+                                  f"(view: mlflow ui --backend-store-uri {settings.MLFLOW_TRACKING_URI})")
+
+    @staticmethod
+    def _params(rag, opts, scenarios):
+        llm = rag.llm
+        base = getattr(llm, "base_url", None)
+        return {
+            "model": opts["model"],
+            "backend": getattr(settings, "LLM_BACKEND", "ollama"),
+            "llm_host": urlparse(base).netloc if base else "local",  # host only; never the key
+            "route": rag.route, "neighbors": rag.neighbors, "hybrid": rag.hybrid, "expand_query": rag.expand_query,
+            "top_k": opts["top_k"], "seed": opts["seed"],
+            "chunk_size": rag.vectorstore.chunk_size, "chunk_overlap": rag.vectorstore.chunk_overlap,
+            "embedding_model": rag.vectorstore.embedding_model,
+            "num_ctx": getattr(llm, "NUM_CTX", None),
+            "scenarios": len(scenarios), "turns": sum(len(s["turns"]) for s in scenarios),
+        }
+
+    @staticmethod
+    def _log_run(mlflow, results, out_dir):
+        n = len(results) or 1
+        def rate(pred):
+            return sum(1 for r in results if pred(r)) / n
+        mlflow.log_metrics({
+            "pass_rate": rate(lambda r: r["pass"]),
+            "turns_passed": sum(r["pass"] for r in results),
+            "retrieval_hit_rate": rate(lambda r: not any(f.startswith("retrieval") for f in r["fails"])),
+            "citation_ok_rate": rate(lambda r: not any(f.startswith(("citation", "invalid citation")) for f in r["fails"])),
+            "forbidden_statement_rate": rate(lambda r: any(f.startswith("forbidden") for f in r["fails"])),
+            "reasked_question_rate": rate(lambda r: any(f.startswith("re-asked") for f in r["fails"])),
+            "bad_question_rate": rate(lambda r: any(f.startswith("bad question") for f in r["fails"])),
+            "insurer_voice_rate": rate(lambda r: r.get("insurer_voice")),
+            "avg_seconds": sum(r["seconds"] for r in results) / n,
+            "max_seconds": max((r["seconds"] for r in results), default=0),
+        })
+        # one 0/1 metric per test turn, so a single question can be followed across runs
+        mlflow.log_metrics({f"pass.{r['id'].split('-')[0]}.t{r['turn']}": float(r["pass"]) for r in results})
+        mlflow.log_table({
+            "scenario": [r["id"] for r in results], "turn": [r["turn"] for r in results],
+            "pass": [r["pass"] for r in results], "problems": ["; ".join(r["fails"]) for r in results],
+            "question": [r["user"] for r in results], "answer": [r["answer"] for r in results],
+            "retrieved_pages": [str(r["retrieved_pages"]) for r in results],
+            "cited_pages": [str(r["cited_pages"]) for r in results], "seconds": [r["seconds"] for r in results],
+        }, artifact_file="turns.json")
+        mlflow.log_artifact(str(out_dir / "results.md"))
+        mlflow.log_artifact(str(out_dir / "results.json"))
 
     def _write(self, out_dir, label, model, results):
         passed = sum(r["pass"] for r in results)

@@ -2,7 +2,7 @@
 
 A local, privacy-friendly assistant for car-insurance claims. Describe what happened (and add a photo of the damage); it works out which coverage in **your own policy** applies, explains the conditions with **cited passages**, lists the steps the policy requires, and asks the follow-up questions that would change the answer.
 
-Everything runs on your machine: embeddings, vector search, the LLM (Qwen 2.5 7B via Ollama) and the vision model. No document or photo leaves the device.
+By default everything runs on your machine: embeddings, vector search, the LLM (Qwen 2.5 7B via Ollama) and the vision model, so no document or photo leaves the device. Without a GPU, use the Google Gemini API instead.
 
 ![Workspace: a hit-and-run question answered from the policy with cited passages, next to damage detection on the photo](docs/screenshots/03-workspace-dark.png)
 
@@ -52,7 +52,7 @@ Photo      YOLOv11-seg (CarDD, 6 classes) → masks + counts → LLM summary →
 |---|---|
 | Web app | Django 5.1, Bootstrap 5 + Bootstrap Icons, vanilla JS (streaming via `fetch` + `ReadableStream`) |
 | Retrieval | LangChain loaders, section-aware chunking, `sentence-transformers` (all-MiniLM-L6-v2), FAISS, LLM coverage routing |
-| Generation | Qwen 2.5 7B through [Ollama](https://ollama.com) (any Ollama model works; a Hugging Face backend is also supported) |
+| Generation | Qwen 2.5 7B through [Ollama](https://ollama.com), or the Google Gemini API (OpenAI-compatible endpoint, via the `openai` SDK); a Hugging Face backend is also supported |
 | Vision | Ultralytics YOLOv11 segmentation, OpenCV |
 
 ### Project layout
@@ -83,11 +83,10 @@ insuranceasst/
 ### Prerequisites
 
 - Python 3.11
-- [Ollama](https://ollama.com/download) with the Qwen 2.5 7B model (~4.7 GB):
-  ```bash
-  ollama pull qwen2.5:7b
-  ```
-- Recommended: an NVIDIA GPU with ~6 GB free VRAM for the LLM. For GPU vision inference, install the CUDA build of PyTorch; without it YOLO runs on CPU automatically.
+- A language model, either:
+  - **local:** [Ollama](https://ollama.com/download) with `ollama pull qwen2.5:7b` (~4.7 GB; an NVIDIA GPU with ~6 GB free VRAM is recommended), or
+  - **no GPU:** a Google Gemini API key. See [Choosing the language model](#choosing-the-language-model).
+- Everything else runs on CPU: the embedding model is small, and YOLO falls back to CPU automatically (about a second per photo). Install the CUDA build of PyTorch only if you want GPU vision inference.
 
 ### Install
 
@@ -95,7 +94,7 @@ insuranceasst/
 git clone <this-repo>
 cd InsurnceAsst
 python -m venv .venv
-# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
+# Windows (Git Bash): source .venv/Scripts/activate   PowerShell: .venv\Scripts\Activate.ps1   macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -119,14 +118,49 @@ Open <http://127.0.0.1:8000>, pick a policy in the top bar, then ask a question 
 
 The first question after startup takes up to a minute while the embedding model and the LLM load; after that, answers start streaming within a few seconds on a GPU.
 
+## Choosing the language model
+
+The model is chosen with environment variables, read from a git-ignored `.env` file in the repo root.
+
+**Google Gemini API (no GPU needed):**
+
+1. Create an API key in [Google AI Studio](https://aistudio.google.com).
+2. Copy the template and put your key in it:
+   ```bash
+   cp .env.example .env
+   ```
+   ```
+   LLM_BACKEND=openai
+   LLM_API_KEY=<your Gemini key>
+   LLM_MODEL=gemini-3.5-flash-lite
+   ```
+3. Restart Django.
+
+The app talks to Gemini through its OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/`, the default for `LLM_BACKEND=openai`). To see which models your key can use:
+
+```bash
+curl -s "https://generativelanguage.googleapis.com/v1beta/openai/models" -H "Authorization: Bearer <your key>"
+```
+
+Use the model name without the `models/` prefix. Prefer non-"thinking" flash/lite models: the coverage-routing step allows only a short reply, and models that reason before answering can return nothing within it.
+
+**Local alternative:** leave `.env` out (or set `LLM_BACKEND=ollama`) to use Ollama with `qwen2.5:7b`.
+
+Things to know:
+- **Privacy:** with Gemini, questions and policy passages are sent to Google, and free-tier prompts may be used to improve Google's products. Use it with the sample policies, not real customer documents; use Ollama for those.
+- **Limits:** free-tier rate and daily limits apply, and models are retired over time (e.g. `gemini-2.5-flash` is no longer offered to new users), so check the model list if a model stops working.
+- If the API can't be reached, the chat shows *"the language model is unavailable … check that &lt;URL&gt; is running"*, and routing falls back to plain search.
+
 ## Configuration
 
-Set in `insuranceasst/insuranceasst/settings.py`:
+Set in `insuranceasst/insuranceasst/settings.py`. The `LLM_*` values come from environment variables or `.env`:
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `LLM_BACKEND` | `"ollama"` | `"ollama"` or `"hf"` (Hugging Face Transformers, loaded in 4-bit) |
-| `LLM_MODEL` | `"qwen2.5:7b"` | Ollama model name (e.g. `mistral`, `llama3.1:8b`), or a Hugging Face repo id when `LLM_BACKEND="hf"` |
+| `LLM_BACKEND` | `"ollama"` | `"openai"` (Gemini API), `"ollama"` or `"hf"` (Hugging Face Transformers, 4-bit) |
+| `LLM_MODEL` | `"qwen2.5:7b"` (`"gemini-3.5-flash-lite"` for `openai`) | Gemini model name, Ollama model name, or a Hugging Face repo id |
+| `LLM_BASE_URL` | Gemini's OpenAI-compatible endpoint for `openai` | Override only to use another OpenAI-compatible API |
+| `LLM_API_KEY` | – | Gemini API key. Keep it in `.env`, never in git |
 | `RAG_ROUTE` | `True` | LLM picks the relevant coverage sections from the policy's catalogue before searching |
 | `RAG_NEIGHBORS` | `True` | Extend each retrieved chunk with the next chunk of the same section |
 | `RAG_HYBRID` | `False` | Fuse BM25 keyword search with vector search (needs `rank_bm25`) |
@@ -168,6 +202,26 @@ python manage.py evaluate --regrade <run-folder>       # re-score saved answers 
 ```
 
 Each run writes `results.md` (per-turn answers, sources and problems) and `results.json` to `eval-runs/<date>_<label>/`, which is git-ignored. Use it to compare models and retrieval settings on your own hardware before changing defaults.
+
+## Experiment tracking and tracing (MLflow)
+
+[MLflow](https://mlflow.org) records two things, both stored locally in `mlflow.db` + `mlruns/` (git-ignored):
+
+| | What | Where in the UI |
+|---|---|---|
+| **Runs** | every `manage.py evaluate`: parameters (model, backend, routing, top-k, chunk size, …), metrics (`pass_rate`, `retrieval_hit_rate`, `citation_ok_rate`, `avg_seconds`, and a `pass.<scenario>.t<turn>` 0/1 per test turn), a per-turn table and `results.md` | Experiment **insurance-assistant-eval** → compare runs side by side |
+| **Traces** | every chat turn: `chat_turn` → `prepare` → `route_sections` (the LLM's section choice) → `retrieve` (passages found) → the LLM call (exact prompt and answer), with timings. Photo uploads trace `vision_analyze` → `yolo.predict` → the summary call | Experiment **insurance-assistant-chat** → *Traces* tab; eval turns appear under the eval run |
+
+```bash
+# from the repo root, with the venv active
+mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+# if the mlflow launcher won't run (e.g. "Permission denied" in Git Bash): python -m mlflow ui ...same options
+# open http://127.0.0.1:5000
+```
+
+- Traces include questions, policy passages and answers. They stay on your machine, but don't share `mlflow.db`.
+- Turn tracing off with `MLFLOW_TRACING=0`, skip run logging with `evaluate --no-mlflow`, or point everything at an MLflow server with `MLFLOW_TRACKING_URI`.
+- The app runs without MLflow installed; tracing then becomes a no-op.
 
 ## Limitations
 

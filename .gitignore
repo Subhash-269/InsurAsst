@@ -12,3 +12,12 @@
 
 # Local evaluation runs (screenshots + transcripts), not part of the repo
 eval-runs/
+
+# Secrets: API keys live here, never in git (template: .env.example)
+.env
+
+# Project virtual environment
+.venv/
+# MLflow local tracking data (runs, traces, artifacts)
+mlruns/
+mlflow.db
